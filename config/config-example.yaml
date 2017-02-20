@@ -1,0 +1,82 @@
+---
+#global settings
+my_server_id: 100
+replica_batch_size: 1000
+copy_max_size: 10000
+my_database:  db_replica
+pg_database: db_replication
+
+# The schema clear stores the tables without obfuscation. 
+# The schema obfuscated stores the tables with the obfuscated  data defined in obfuscation.yaml
+schema_clear: sch_clear
+schema_obf: sch_obf
+
+# The obfuscation file, if empty defaults to config/obfuscation.yaml
+obfuscation_file: 
+
+#skip view drop and creation in obfuscated schema
+skip_view:
+
+
+copy_mode: 'file' 
+#copy_mode: 'direct'
+
+hexify: 
+    - 'blob'
+    - 'tinyblob'
+    - 'mediumblob'
+    - 'longblob'
+    - 'binary'
+
+pid_dir: 'pid/'
+
+log_dir: 'logs/'
+log_level: 'debug'
+log_dest: 'stdout'
+log_append: True
+#log_dest: 'file'
+#log_level: 'info'
+#log_level: 'debug'
+
+
+#mysql connection's charset. 
+my_charset: 'utf8'
+#postgresql connection's charset. 
+pg_charset: 'utf8'
+#include tables only
+tables_limit:
+    
+#exclude tables 
+exclude_tables:
+
+# per table copy max override
+copy_override: 
+    table_name: 1000
+
+#mysql slave setup
+mysql_conn:
+    host: localhost
+    port: 3306
+    user: replication_username
+    passwd: never_commit_passwords
+
+#postgres connection
+pg_conn:
+    host: localhost
+    port: 5432
+    user: replication_username
+    password: never_commit_passwords
+ 
+
+ #mail server for mail relay
+email_config: 
+    subj_prefix: 'PGOBFUSCATOR'
+    smtp_login: Yes
+    smtp_server: 'smtp.foo.bar'
+    smtp_port: 587
+    email_from: pgobfuscator@foo.bar
+    smtp_username: login@foo.bar
+    smtp_password: never_commit_passwords
+    smtp_tls: Yes
+    email_rcpt:
+        - alert@foo.bar

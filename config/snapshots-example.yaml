@@ -1,0 +1,15 @@
+---
+#mysql connections, each name should be unique
+#the snapshotter will loop trough each connection and pull out the entire db or the
+#tables listed in table_limit
+test:
+    host: localhost
+    port: 3306
+    user: replication_username
+    passwd: never_commit_passwords
+    my_database:  db_replica
+    destination_schema: test_clear
+    my_charset: 'utf8'
+    tables_limit:
+        - table_test
+    copy_max_size: 100000
