@@ -1,4 +1,4 @@
-pg_obfuscator
+pg_ninja
 ##############
 
 

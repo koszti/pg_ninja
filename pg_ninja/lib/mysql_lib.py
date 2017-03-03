@@ -3,7 +3,6 @@ import pymysql
 import sys
 import codecs
 import binascii
-import sqlparse
 import hashlib
 import datetime
 from pymysqlreplication import BinLogStreamReader
