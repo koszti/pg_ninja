@@ -561,8 +561,26 @@ class pg_engine:
 												SET v_table_pkey=EXCLUDED.v_table_pkey
 										;
 								"""
-				self.pg_conn.pgsql_cur.execute(sql_insert, (table_name, self.pg_conn.dest_schema, index["index_columns"]))	
-				self.pg_conn.pgsql_cur.execute(sql_insert, (table_name, self.pg_conn.schema_obf, index["index_columns"]))	
+				
+				self.pg_conn.pgsql_cur.execute(sql_insert, (table_name, self.pg_conn.dest_schema, index["index_columns"].strip()))	
+				self.pg_conn.pgsql_cur.execute(sql_insert, (table_name, self.pg_conn.schema_obf, index["index_columns"].strip()))	
+	
+	def unregister_table(self, table_name):
+		self.logger.info("unregistering table %s from the replica catalog" % (table_name,))
+		sql_delete=""" DELETE FROM sch_chameleon.t_replica_tables 
+									WHERE
+											v_table_name=%s
+										AND	v_schema_name=%s
+								RETURNING i_id_table
+								;
+						"""
+		self.pg_conn.pgsql_cur.execute(sql_delete, (table_name, self.dest_schema))	
+		removed_id=self.pg_conn.pgsql_cur.fetchone()
+		table_id=removed_id[0]
+		self.logger.info("renaming table %s to %s_%s" % (table_name, table_name, table_id))
+		sql_rename="""ALTER TABLE IF EXISTS "%s"."%s" rename to "%s_%s"; """ % (self.dest_schema, table_name, table_name, table_id)
+		self.logger.debug(sql_rename)
+		self.pg_conn.pgsql_cur.execute(sql_rename)	
 	
 	def create_tables(self, drop_tables=False, store_tables=True):
 			for table in self.table_ddl:
@@ -833,17 +851,17 @@ class pg_engine:
 									LIMIT 1
 								) tab
 						;
-
-
-
-
 					"""
 		self.pg_conn.pgsql_cur.execute(sql_tab_log)
-		results=self.pg_conn.pgsql_cur.fetchone()
-		table_file=results[0]
-		master_data=master_status[0]
-		binlog_name=master_data["File"]
-		binlog_position=master_data["Position"]
+		results = self.pg_conn.pgsql_cur.fetchone()
+		table_file = results[0]
+		master_data = master_status[0]
+		binlog_name = master_data["File"]
+		binlog_position = master_data["Position"]
+		try:
+			event_time = datetime.datetime.fromtimestamp(master_data["Time"]).isoformat()
+		except:
+			event_time  = None
 		self.logger.debug("master data: table file %s, log name: %s, log position: %s " % (table_file, binlog_name, binlog_position))
 		sql_master="""
 							INSERT INTO sch_chameleon.t_replica_batch
@@ -857,26 +875,28 @@ class pg_engine:
 																%s,
 																%s
 															)
-							ON CONFLICT DO NOTHING
+							--ON CONFLICT DO NOTHING
 							RETURNING i_id_batch
 							;
 						"""
-		self.logger.debug("saving master data")
+						
+		self.logger.info("saving master data  log file: %s  log position:%s Last event: %s" % (binlog_name, binlog_position, event_time))
+		
+		
 		try:
 			if cleanup:
-				self.logger.info("cleaning not replayed batches")
+				self.logger.info("cleaning not replayed batches ")
 				sql_cleanup=""" DELETE FROM sch_chameleon.t_replica_batch WHERE NOT b_replayed; """
 				self.pg_conn.pgsql_cur.execute(sql_cleanup)
-			
 			self.pg_conn.pgsql_cur.execute(sql_master, (binlog_name, binlog_position, table_file))
 			results=self.pg_conn.pgsql_cur.fetchone()
 			next_batch_id=results[0]
 		except psycopg2.Error as e:
 					self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
-					self.logger.error(self.pg_conn.pgsql_cur.mogrify(sql_master, (binlog_name, binlog_position, table_file)))
-		except:
-			pass
+					self.logger.error(self.pg_conn.pgsql_cur.mogrify(sql_master, ( binlog_name, binlog_position, table_file)))
+		
 		return next_batch_id
+		
 		
 	def get_batch_data(self):
 		sql_batch="""WITH t_created AS
@@ -941,7 +961,7 @@ class pg_engine:
 									jsb_event_data
 								)
 								VALUES
-									"""+ ','.join(insert_list )+"""
+									"""+ ','.join(insert_list ).decode()+"""
 								;
 						"""
 		try:
@@ -1003,94 +1023,112 @@ class pg_engine:
 			self.pg_conn.pgsql_cur.execute(sql_process, (replica_batch_size, ))
 			batch_result=self.pg_conn.pgsql_cur.fetchone()
 			batch_loop=batch_result[0]
+			self.logger.debug("Batch loop value %s" % (batch_loop))
 			#self.logger.debug("Batch loop value %s" % (batch_loop))		
 
 
-	def generate_alter_table(self, token,my_cursor, my_database):
-		lst_alter=[]
+	def build_alter_table(self, token):
+		""" the function builds the alter table statement from the token idata"""
+		alter_cmd=[]
 		ddl_enum=[]
-		if token:
-			table=token["name"]
-			command=token["command"]
-			for alter in token["alter"]:
-				if  alter["command"]=="DROP COLUMN" or alter["command"]=="DROP":
-					sql_alter="%(command)s \"%(column)s\" CASCADE" % alter
-				elif alter["command"]=="ADD COLUMN" or alter["command"]=="ADD":
-					sql_meta="""
-										SELECT 
-											column_name,
-											column_default,
-											ordinal_position,
-											data_type,
-											character_maximum_length,
-											extra,
-											column_key,
-											is_nullable,
-											numeric_precision,
-											numeric_scale,
-											CASE 
-												WHEN data_type="enum"
-											THEN	
-												SUBSTRING(COLUMN_TYPE,5)
-											END AS enum_list
-										FROM 
-											information_schema.COLUMNS 
-										WHERE 
-														table_schema=%s
-											AND 	table_name=%s
-											AND 	column_name=%s
-										;
-									"""
-					my_cursor.execute(sql_meta, (my_database, table, alter["column"]))
-					column=my_cursor.fetchone()
-					column_type=self.type_dictionary[column["data_type"]]
-					if column_type=="enum":
-						enum_type="enum_"+token["name"]+"_"+column["column_name"]
-						sql_drop_enum='DROP TYPE IF EXISTS '+enum_type+' CASCADE;'
-						sql_create_enum="CREATE TYPE "+enum_type+" AS ENUM "+column["enum_list"]+";"
-						ddl_enum.append(sql_drop_enum)
-						ddl_enum.append(sql_create_enum)
-						column_type=enum_type
-					if column_type=="character varying" or column_type=="character":
-						column_type=column_type+"("+str(column["character_maximum_length"])+")"
-					if column_type=='numeric':
-						column_type=column_type+"("+str(column["numeric_precision"])+","+str(column["numeric_scale"])+")"
-					if column_type=='bit' or column_type=='float':
-						column_type=column_type+"("+str(column["numeric_precision"])+")"
-					if column["extra"]=="auto_increment":
-						column_type="bigserial"
-					#ddl_columns.append('"'+column["column_name"]+'" '+column_type+" "+col_is_null )
-					sql_alter="%s \"%s\" %s NULL" % (alter["command"] , column["column_name"],  column_type)
-				lst_alter.append(sql_alter)
-			return "%s ALTER TABLE \"%s\" %s ;"% (' '.join(ddl_enum), table, ','.join(lst_alter))
+		query_cmd=token["command"]
+		table_name=token["name"]
+		for alter_dic in token["alter_cmd"]:
+			if alter_dic["command"] == 'DROP':
+				alter_cmd.append("%(command)s \"%(name)s\" CASCADE" % alter_dic)
+			elif alter_dic["command"] == 'ADD':
+				column_type=self.type_dictionary[alter_dic["type"]]
+				if column_type=="enum":
+					enum_name="enum_"+table_name+"_"+alter_dic["name"]
+					column_type=enum_name
+					sql_drop_enum='DROP TYPE IF EXISTS '+column_type+' CASCADE;'
+					sql_create_enum="CREATE TYPE "+column_type+" AS ENUM ("+alter_dic["dimension"]+");"
+					ddl_enum.append(sql_drop_enum)
+					ddl_enum.append(sql_create_enum)
+				if column_type=="character varying" or column_type=="character" or column_type=='numeric' or column_type=='bit' or column_type=='float':
+						column_type=column_type+"("+str(alter_dic["dimension"])+")"
+				alter_cmd.append("%s \"%s\" %s NULL" % (alter_dic["command"], alter_dic["name"], column_type))	
+			elif alter_dic["command"] == 'CHANGE':
+				sql_rename = ""
+				sql_type = ""
+				old_column=alter_dic["old"]
+				new_column=alter_dic["new"]
+				column_type=self.type_dictionary[alter_dic["type"]]
+				if column_type=="character varying" or column_type=="character" or column_type=='numeric' or column_type=='bit' or column_type=='float':
+						column_type=column_type+"("+str(alter_dic["dimension"])+")"
+				sql_type = """ALTER TABLE "%s" ALTER COLUMN "%s" SET DATA TYPE %s  USING "%s"::%s ;;""" % (table_name, old_column, column_type, old_column, column_type)
+				if old_column != new_column:
+					sql_rename="""ALTER TABLE  "%s" RENAME COLUMN "%s" TO "%s" ;""" % (table_name, old_column, new_column)
+				query=sql_type+sql_rename
+				return query
+			elif alter_dic["command"] == 'MODIFY':
+				column_type=self.type_dictionary[alter_dic["type"]]
+				column_name=alter_dic["name"]
+				if column_type=="character varying" or column_type=="character" or column_type=='numeric' or column_type=='bit' or column_type=='float':
+						column_type=column_type+"("+str(alter_dic["dimension"])+")"
+				query = """ALTER TABLE "%s" ALTER COLUMN "%s" SET DATA TYPE %s USING "%s"::%s ;""" % (table_name, column_name, column_type, column_name, column_type)
+				return query
+		query=' '.join(ddl_enum)+" "+query_cmd + ' '+ table_name+ ' ' +', '.join(alter_cmd)+" ;"
+		return query
+
+	
 					
 
-	def gen_query(self, token, command, name, my_cursor, my_database):
+	def drop_primary_key(self, token):
+		self.logger.info("dropping primary key for table %s" % (token["name"],))
+		sql_gen="""
+						SELECT  DISTINCT
+							format('ALTER TABLE %%I.%%I DROP CONSTRAINT %%I;',
+							table_schema,
+							table_name,
+							constraint_name
+							)
+						FROM 
+							information_schema.key_column_usage 
+						WHERE 
+								table_schema=%s 
+							AND table_name=%s;
+					"""
+		self.pg_conn.pgsql_cur.execute(sql_gen, (self.pg_conn.dest_schema, token["name"]))
+		value_check=self.pg_conn.pgsql_cur.fetchone()
+		if value_check:
+			sql_drop=value_check[0]
+			self.pg_conn.pgsql_cur.execute(sql_drop)
+			self.unregister_table(token["name"])
+
+	def gen_query(self, token):
 		""" the function generates the ddl"""
 		query=""
 		
-		if command=="DROP TABLE":
-			query=" %(command)s IF EXISTS \"%(name)s\"  CASCADE;" % token
-		elif command=="CREATE TABLE":
+		if token["command"] =="DROP TABLE":
+			query=" %(command)s IF EXISTS \"%(name)s\" CASCADE;" % token
+		elif token["command"] =="CREATE TABLE":
+			table_metadata={}
+			table_metadata["columns"]=token["columns"]
+			table_metadata["name"]=token["name"]
+			table_metadata["indices"]=token["indices"]
 			self.table_metadata={}
-			self.table_metadata=token
+			self.table_metadata[token["name"]]=table_metadata
 			self.build_tab_ddl()
 			self.build_idx_ddl()
-			query_type=' '.join(self.type_ddl[name])
-			query_table=self.table_ddl[name]
-			query_idx=' '.join(self.idx_ddl[name])
+			query_type=' '.join(self.type_ddl[token["name"]])
+			query_table=self.table_ddl[token["name"]]
+			query_idx=' '.join(self.idx_ddl[token["name"]])
 			query=query_type+query_table+query_idx
-			self.store_table(name)
-		elif command=="ALTER TABLE":
-			query=self.generate_alter_table(token, my_cursor, my_database)
-			
+			self.store_table(token["name"])
+		elif token["command"] == "ALTER TABLE":
+			query=self.build_alter_table(token)
+		elif token["command"] == "DROP PRIMARY KEY":
+			self.drop_primary_key(token)
 		return query 
 		
-	def write_ddl(self, token, query_data, command, my_cursor, my_database):
-		pg_ddl=self.gen_query(token, command, query_data["name"], my_cursor, my_database)
+		
+	def write_ddl(self, token, query_data):
+		sql_path=" SET search_path="+self.pg_conn.dest_schema+";"
+		pg_ddl=sql_path+self.gen_query(token)
 		log_table=query_data["log_table"]
 		insert_vals=(	query_data["batch_id"], 
-								query_data["name"],  
+								token["name"],  
 								query_data["schema"], 
 								query_data["binlog"], 
 								query_data["logpos"], 
@@ -1119,7 +1157,7 @@ class pg_engine:
 								)
 						"""
 		self.pg_conn.pgsql_cur.execute(sql_insert, insert_vals)
-	
+		
 	def truncate_table(self, table_name, schema_name):
 		sql_clean="""
 							SELECT 

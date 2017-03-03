@@ -140,6 +140,7 @@ class mysql_engine:
 		self.schema_clear=global_config.schema_clear
 		self.schema_obf=global_config.schema_obf
 		self.copy_override=global_config.copy_override
+		self.sql_token=sql_token()
 		
 			
 	def obfuscate_value(self, column_value, obf_mode, column_data_type):
@@ -229,29 +230,31 @@ class mysql_engine:
 			elif isinstance(binlogevent, QueryEvent):
 				grp_length = len(group_insert)
 				if len(group_insert)>0:
+					self.logger.debug("WRITING GROUP - binlogfile %s, position %s. Lenght group insert: %s \n rows: %s " % (binlogfile, binlogevent.packet.log_pos, grp_length, len(group_insert) ))
 					pg_engine.write_batch(group_insert)
 					group_insert=[]
-				sql_tokenise.capture_ddl(binlogevent.query)
-				if len(sql_tokenise.tokenised)>0 and sql_tokenise.tokenised[0] != {}:
-					log_file=binlogfile
-					log_position=binlogevent.packet.log_pos
-					master_data["File"]=log_file
-					master_data["Position"]=log_position
-					self.logger.debug("CAPTURED QUERY- binlogfile %s, position %s. Lenght group insert: %s \n Query: %s " % (binlogfile, log_position, grp_length, binlogevent.query))
-					query_data={
-													"binlog":log_file, 
-													"logpos":log_position, 
-													"schema": self.schema_clear, 
-													"batch_id":id_batch, 
-													"log_table":log_table
-								}
-					self.write_query(sql_tokenise.tokenised, pg_engine, query_data)
-					close_batch=True
-					table_type_map=self.get_table_type_map()	
-				sql_tokenise.tokenised=[]
+				self.sql_token.parse_sql(binlogevent.query)
+				print self.sql_token.tokenised
+				for token in self.sql_token.tokenised:
+					if len(token)>0:
+						master_data["File"]=binlogfile
+						master_data["Position"]=binlogevent.packet.log_pos
+						self.logger.debug("CAPTURED QUERY- binlogfile %s, position %s. Lenght group insert: %s \n Query: %s " % (binlogfile, binlogevent.packet.log_pos, grp_length, binlogevent.query))
+						query_data={
+									"binlog":log_file, 
+									"logpos":log_position, 
+									"schema": self.schema_clear, 
+									"batch_id":id_batch, 
+									"log_table":log_table
+						}
+						pg_engine.write_ddl(token, query_data)
+						close_batch=True
+					
+				self.sql_token.reset_lists()
 				if close_batch:
 					my_stream.close()
 					return [master_data, close_batch]
+				
 			else:
 				
 				for row in binlogevent.rows:
@@ -332,8 +335,7 @@ class mysql_engine:
 
 	def run_replica(self, pg_engine):
 		"""
-		Reads the MySQL replica and stores the data in postgres. When a max_batch_size is reached the replica disconnects and
-		the changes are replayed on PostgreSQL.
+		Reads the MySQL replica and stores the data in postgres. 
 		
 		:param pg_engine: The postgresql engine object required for storing the master coordinates and replaying the batches
 		"""
@@ -350,17 +352,17 @@ class mysql_engine:
 				self.logger.debug("trying to save the master data...")
 				next_id_batch=pg_engine.save_master_status(self.master_status)
 				if next_id_batch:
-					self.logger.debug("success, saving id_batch %s in class variable" % (id_batch))
+					self.logger.debug("new batch created, saving id_batch %s in class variable" % (id_batch))
 					self.id_batch=id_batch
 				else:
-					self.logger.debug("failure, means empty batch. using old id_batch %s" % (self.id_batch))
-					
+					self.logger.debug("batch not saved. using old id_batch %s" % (self.id_batch))
 				if self.id_batch:
 					self.logger.debug("updating processed flag for id_batch %s", (id_batch))
 					pg_engine.set_batch_processed(id_batch)
 					self.id_batch=None
 		self.logger.debug("replaying batch.")
 		pg_engine.process_batch(self.replica_batch_size)
+		
 
 	
 		
