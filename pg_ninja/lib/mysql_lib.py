@@ -14,7 +14,7 @@ from pymysqlreplication.row_event import (
     WriteRowsEvent,
 )
 from pymysqlreplication.event import RotateEvent
-from pg_chameleon import sql_token
+from pg_ninja import sql_token
 
 class mysql_connection:
 	"""
@@ -299,11 +299,13 @@ class mysql_engine:
 						event_values_obf=None
 					
 					if obf_list:
-						for column_name in obf_list:
-							obf_mode=obf_list[column_name]
-							event_values_obf[column_name]=self.obfuscate_value(event_values_obf[column_name], obf_mode, column_data_type)
-					
-					
+						try:
+							for column_name in obf_list:
+								obf_mode=obf_list[column_name]
+								event_values_obf[column_name]=self.obfuscate_value(event_values_obf[column_name], obf_mode, column_data_type)
+						except:
+							self.logger.error("discarded row in obfuscation process.\n global_data:%s \n event_data:%s \n" % (global_data,event_values ))
+							
 					event_data = dict(event_data.items() +event_values.items())
 					event_insert={"global_data":global_data,"event_data":event_data}
 					group_insert.append(event_insert)

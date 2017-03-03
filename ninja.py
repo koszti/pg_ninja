@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import argparse
-from pg_chameleon import replica_engine
+from pg_ninja import replica_engine
 commands = [
 					'create_schema',
 					'init_replica',

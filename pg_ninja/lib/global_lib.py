@@ -1,4 +1,4 @@
-from pg_chameleon import mysql_connection, mysql_engine, pg_engine, mysql_snapshot, email_alerts
+from pg_ninja import mysql_connection, mysql_engine, pg_engine, mysql_snapshot, email_alerts
 import yaml
 import sys
 import os
@@ -16,7 +16,7 @@ class global_config:
 		configuration values.
 		The class sets the log output file from the parameter command.  If the log destination is stdout then the logfile is ignored
 		
-		:param command: the command specified on the pg_chameleon.py command line
+		:param command: the command specified on the pg_ninja.py command line
 	
 	"""
 	def __init__(self,command):
@@ -104,7 +104,7 @@ class replica_engine:
 		class  and setup the mysql and postgresql engines as class objects. 
 		The class setup the logging using the configuration parameter (e.g. log level debug on stdout).
 		
-		:param command: the command specified on the pg_chameleon.py command line
+		:param command: the command specified on the pg_ninja.py command line
 		
 	"""
 	def __init__(self, command):

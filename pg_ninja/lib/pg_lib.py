@@ -92,7 +92,17 @@ class pg_engine:
 		self.type_ddl={}
 		self.pg_charset=self.pg_conn.pg_charset
 		self.cat_version='0.8'
-		self.cat_sql=[]
+		self.cat_sql=[
+									{'version':'base','script': 'create_schema.sql'}, 
+									{'version':'0.1','script': 'upgrade/cat_0.1.sql'}, 
+									{'version':'0.2','script': 'upgrade/cat_0.2.sql'}, 
+									{'version':'0.3','script': 'upgrade/cat_0.3.sql'}, 
+									{'version':'0.4','script': 'upgrade/cat_0.4.sql'}, 
+									{'version':'0.5','script': 'upgrade/cat_0.5.sql'}, 
+									{'version':'0.6','script': 'upgrade/cat_0.6.sql'}, 
+									{'version':'0.7','script': 'upgrade/cat_0.7.sql'}, 
+									{'version':'0.8','script': 'upgrade/cat_0.8.sql'}, 
+							]
 		cat_version=self.get_schema_version()
 		num_schema=(self.check_service_schema())[0]
 		if cat_version!=self.cat_version and int(num_schema)>0:

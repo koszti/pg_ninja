@@ -15,8 +15,10 @@ class sql_token:
 		self.m_alter_index=re.compile(r'(?:(ALTER\s+?TABLE)\s+(`?\b.*?\b`?))\s+((?:ADD|DROP)\s+(?:UNIQUE)?\s*?(?:INDEX).*,?)', re.IGNORECASE)
 		self.m_alter=re.compile(r'((?:(?:ADD|DROP)\s+(?:COLUMN)?))(.*?,)', re.IGNORECASE)
 		
+		
 	def capture_alter(self,  alter_string):
 		capture_allowed=['ADD COLUMN', 'DROP COLUMN', 'ADD', 'DROP']
+		capture_disabled=['ADD CONSTRAINT']
 		capture_lst=[]
 		captured=self.m_alter.findall(alter_string)
 		for alter in captured:
