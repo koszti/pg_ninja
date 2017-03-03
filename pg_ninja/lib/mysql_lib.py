@@ -191,7 +191,6 @@ class mysql_engine:
 	
 		"""
 		table_type_map=self.get_table_type_map()	
-		sql_tokenise=sql_token()
 		close_batch=False
 		total_events=0
 		master_data={}
@@ -234,7 +233,7 @@ class mysql_engine:
 					pg_engine.write_batch(group_insert)
 					group_insert=[]
 				self.sql_token.parse_sql(binlogevent.query)
-				print self.sql_token.tokenised
+				
 				for token in self.sql_token.tokenised:
 					if len(token)>0:
 						master_data["File"]=binlogfile
