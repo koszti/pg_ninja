@@ -245,7 +245,7 @@ class replica_engine:
 	
 	def create_service_schema(self):
 		"""
-			Creates the service schema sch_chameleon on the PostgreSQL database. The service schema is required for having the replica working correctly.
+			Creates the service schema sch_ninja on the PostgreSQL database. The service schema is required for having the replica working correctly.
 	
 		"""
 		self.pg_eng.create_service_schema()

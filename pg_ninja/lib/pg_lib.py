@@ -155,13 +155,13 @@ class pg_engine:
 			obf_list.append(obf_table)
 		
 		self.logger.info("clearing existing idx definition for schema %s"  % (self.pg_conn.schema_obf))
-		sql_del="""DELETE FROM sch_chameleon.t_rebuild_idx;"""
+		sql_del="""DELETE FROM sch_ninja.t_rebuild_idx;"""
 		self.pg_conn.pgsql_cur.execute(sql_del)	
 		self.logger.info("saving index and key definitions for tables in schema %s"  % (self.pg_conn.schema_obf))
 		
 		sql_idx_def="""
 			
-			INSERT INTO sch_chameleon.t_rebuild_idx
+			INSERT INTO sch_ninja.t_rebuild_idx
 				(
 					v_schema_name,
 					v_table_name,
@@ -210,7 +210,7 @@ class pg_engine:
 		"""
 		self.pg_conn.pgsql_cur.execute(sql_idx_def, (obf_list, self.pg_conn.schema_obf))	
 		sql_pkeys = """
-							INSERT INTO sch_chameleon.t_rebuild_idx
+							INSERT INTO sch_ninja.t_rebuild_idx
 							(
 								v_schema_name,
 								v_table_name,
@@ -304,7 +304,7 @@ class pg_engine:
 		sql_get_drop="""SELECT 
 									t_drop
 								FROM 
-									sch_chameleon.t_rebuild_idx  
+									sch_ninja.t_rebuild_idx  
 								WHERE
 									v_table_name=%s
 									AND v_schema_name=%s
@@ -320,7 +320,7 @@ class pg_engine:
 		sql_get_create="""SELECT 
 									t_create
 								FROM 
-									sch_chameleon.t_rebuild_idx  
+									sch_ninja.t_rebuild_idx  
 								WHERE
 									v_table_name=%s
 									AND v_schema_name=%s
@@ -545,7 +545,7 @@ class pg_engine:
 		table_data=self.table_metadata[table_name]
 		for index in table_data["indices"]:
 			if index["index_name"]=="PRIMARY":
-				sql_insert=""" INSERT INTO sch_chameleon.t_replica_tables 
+				sql_insert=""" INSERT INTO sch_ninja.t_replica_tables 
 										(
 											v_table_name,
 											v_schema_name,
@@ -567,7 +567,7 @@ class pg_engine:
 	
 	def unregister_table(self, table_name):
 		self.logger.info("unregistering table %s from the replica catalog" % (table_name,))
-		sql_delete=""" DELETE FROM sch_chameleon.t_replica_tables 
+		sql_delete=""" DELETE FROM sch_ninja.t_replica_tables 
 									WHERE
 											v_table_name=%s
 										AND	v_schema_name=%s
@@ -746,7 +746,7 @@ class pg_engine:
 							SELECT 
 											t_version
 							FROM 
-											sch_chameleon.v_version 
+											sch_ninja.v_version 
 							;
 						"""
 		try:
@@ -789,7 +789,7 @@ class pg_engine:
 								FROM 
 									information_schema.schemata  
 								WHERE 
-									schema_name='sch_chameleon'
+									schema_name='sch_ninja'
 						"""
 			
 		self.pg_conn.pgsql_cur.execute(sql_check)
@@ -838,7 +838,7 @@ class pg_engine:
 											ts_created
 											
 									FROM
-											sch_chameleon.t_replica_batch
+											sch_ninja.t_replica_batch
 									)
 									UNION ALL
 									(
@@ -864,7 +864,7 @@ class pg_engine:
 			event_time  = None
 		self.logger.debug("master data: table file %s, log name: %s, log position: %s " % (table_file, binlog_name, binlog_position))
 		sql_master="""
-							INSERT INTO sch_chameleon.t_replica_batch
+							INSERT INTO sch_ninja.t_replica_batch
 															(
 																t_binlog_name, 
 																i_binlog_position,
@@ -886,7 +886,7 @@ class pg_engine:
 		try:
 			if cleanup:
 				self.logger.info("cleaning not replayed batches ")
-				sql_cleanup=""" DELETE FROM sch_chameleon.t_replica_batch WHERE NOT b_replayed; """
+				sql_cleanup=""" DELETE FROM sch_ninja.t_replica_batch WHERE NOT b_replayed; """
 				self.pg_conn.pgsql_cur.execute(sql_cleanup)
 			self.pg_conn.pgsql_cur.execute(sql_master, (binlog_name, binlog_position, table_file))
 			results=self.pg_conn.pgsql_cur.fetchone()
@@ -904,12 +904,12 @@ class pg_engine:
 							SELECT 
 								max(ts_created) AS ts_created
 							FROM 
-								sch_chameleon.t_replica_batch  
+								sch_ninja.t_replica_batch  
 							WHERE 
 											NOT b_processed
 								AND 	NOT b_replayed
 						)
-					UPDATE sch_chameleon.t_replica_batch
+					UPDATE sch_ninja.t_replica_batch
 						SET b_started=True
 						FROM 
 							t_created
@@ -926,7 +926,7 @@ class pg_engine:
 		batch_data=self.pg_conn.pgsql_cur.fetchall()
 		batch_id=batch_data[0][0]
 		self.logger.debug("cleaning the batch data for %s " % batch_id)
-		sql_clean="""DELETE FROM sch_chameleon.t_log_replica WHERE i_id_batch=%s ;  """
+		sql_clean="""DELETE FROM sch_ninja.t_log_replica WHERE i_id_batch=%s ;  """
 		self.pg_conn.pgsql_cur.execute(sql_clean, (batch_id, ))
 
 		return  batch_data
@@ -950,7 +950,7 @@ class pg_engine:
 											)
 			
 		sql_insert="""
-								INSERT INTO sch_chameleon."""+log_table+"""
+								INSERT INTO sch_ninja."""+log_table+"""
 								(
 									i_id_batch, 
 									v_table_name, 
@@ -976,7 +976,7 @@ class pg_engine:
 					event_data=row_data["event_data"]
 					log_table=global_data["log_table"]
 					sql_insert="""
-								INSERT INTO sch_chameleon."""+log_table+"""
+								INSERT INTO sch_ninja."""+log_table+"""
 								(
 									i_id_batch, 
 									v_table_name, 
@@ -1006,7 +1006,7 @@ class pg_engine:
 				
 	def set_batch_processed(self, id_batch):
 		self.logger.debug("updating batch %s to processed" % (id_batch, ))
-		sql_update=""" UPDATE sch_chameleon.t_replica_batch
+		sql_update=""" UPDATE sch_ninja.t_replica_batch
 										SET
 												b_processed=True,
 												ts_processed=now()
@@ -1018,7 +1018,7 @@ class pg_engine:
 		
 	def process_batch(self, replica_batch_size):
 		batch_loop=True
-		sql_process="""SELECT sch_chameleon.fn_process_batch(%s);"""
+		sql_process="""SELECT sch_ninja.fn_process_batch(%s);"""
 		while batch_loop:
 			self.pg_conn.pgsql_cur.execute(sql_process, (replica_batch_size, ))
 			batch_result=self.pg_conn.pgsql_cur.fetchone()
@@ -1135,7 +1135,7 @@ class pg_engine:
 								pg_ddl
 							)
 		sql_insert="""
-								INSERT INTO sch_chameleon."""+log_table+"""
+								INSERT INTO sch_ninja."""+log_table+"""
 								(
 									i_id_batch, 
 									v_table_name, 
@@ -1202,7 +1202,7 @@ class pg_engine:
 								format('%I.%I',v_schema,v_table) as v_tab,
 								v_table
 							FROM
-								sch_chameleon.t_index_def 
+								sch_ninja.t_index_def 
 							ORDER BY 
 								v_table
 			"""
@@ -1230,8 +1230,8 @@ class pg_engine:
 			table_filter=self.pg_conn.pgsql_cur.mogrify("WHERE table_name IN  (SELECT unnest(%s)) ", (table_limit, ))
 		
 		sql_get_idx=""" 
-				DELETE FROM sch_chameleon.t_index_def;
-				INSERT INTO sch_chameleon.t_index_def
+				DELETE FROM sch_ninja.t_index_def;
+				INSERT INTO sch_ninja.t_index_def
 					(
 						v_schema,
 						v_table,
@@ -1310,14 +1310,14 @@ class pg_engine:
 		
 	
 	def drop_src_indices(self):
-		sql_idx="""SELECT t_drop FROM  sch_chameleon.t_index_def;"""
+		sql_idx="""SELECT t_drop FROM  sch_ninja.t_index_def;"""
 		self.pg_conn.pgsql_cur.execute(sql_idx)
 		idx_drop=self.pg_conn.pgsql_cur.fetchall()
 		for drop_stat in idx_drop:
 			self.pg_conn.pgsql_cur.execute(drop_stat[0])
 			
 	def create_src_indices(self):
-		sql_idx="""SELECT t_create FROM  sch_chameleon.t_index_def"""
+		sql_idx="""SELECT t_create FROM  sch_ninja.t_index_def"""
 		self.pg_conn.pgsql_cur.execute(sql_idx)
 		idx_create=self.pg_conn.pgsql_cur.fetchall()
 		for create_stat in idx_create:

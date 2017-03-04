@@ -70,11 +70,11 @@ pg_conn:
 
  #mail server for mail relay
 email_config: 
-    subj_prefix: 'PGOBFUSCATOR'
+    subj_prefix: 'PGNINJA'
     smtp_login: Yes
     smtp_server: 'smtp.foo.bar'
     smtp_port: 587
-    email_from: pgobfuscator@foo.bar
+    email_from: pgninja@foo.bar
     smtp_username: login@foo.bar
     smtp_password: never_commit_passwords
     smtp_tls: Yes
