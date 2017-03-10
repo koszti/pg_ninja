@@ -8,7 +8,7 @@ class sql_token(object):
 	def __init__(self):
 		self.tokenised=[]
 		self.query_list=[]
-		self.pkey_cols=[]
+		self.pkey_cols=""
 		
 		#re for column definitions
 		self.m_columns=re.compile(r'\((.*)\)', re.IGNORECASE)
