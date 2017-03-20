@@ -2,7 +2,7 @@ pg_ninja
 ##############
 
 
-Migration, replica  and obfuscation from MySQL to PostgreSQL
+Replica  and obfuscation from MySQL to PostgreSQL
 
 Current version: 0.1 DEVEL
 
@@ -28,19 +28,17 @@ Requirements
 ******************
 * `PyMySQL==0.7.6 <https://github.com/PyMySQL/PyMySQL>`_ 
 * `argparse==1.2.1 <https://github.com/bewest/argparse>`_
-* `mysql-replication==0.9 <https://github.com/noplay/python-mysql-replication>`_
+* `mysql-replication==0.11 <https://github.com/noplay/python-mysql-replication>`_
 * `psycopg2==2.6.2 <https://github.com/psycopg/psycopg2>`_
 * `PyYAML==3.11 <https://github.com/yaml/pyyaml>`_
-* `daemonize==2.4.7 <https://pypi.python.org/pypi/daemonize/>`_
 * `sphinx==1.4.6 <http://www.sphinx-doc.org/en/stable/>`_
 * `sphinx-autobuild==0.6.0 <https://github.com/GaretJax/sphinx-autobuild>`_
 
 Documentation
 *****************************
+In order to build the documentation activate the virtual environment then cd into the subdirectory docs .
 
-Activate the virtual environment then cd into the docs subdirectory.
-
-Run make html
+Run the command make html
 
 e.g. 
 
@@ -50,26 +48,40 @@ e.g.
 	cd docs
 	make html
 	
-The documents will be built in the _build/html subdirectory.
+Sphinx will build the documents in the subdirectory _build/html .
 
 
-Configuration parameters
+Configuration file 
 ********************************
 The configuration file is a yaml file. Each parameter controls the
 way the program acts.
 
-* my_server_id the server id for the mysql replica. must be unique among the replica cluster
-* copy_max_size the max rows pulled out in each slice when copying the table in PostgreSQL
+* my_server_id the server id used by the mysql replica. 
+* copy_max_size the slice's size in rows when copying a table from MySQL to PostgreSQL
 * my_database mysql database to replicate. a schema with the same name will be initialised in the postgres database
 * pg_database destination database in PostgreSQL. 
-* copy_mode the allowed values are 'file'  and 'direct'. With direct the copy happens on the fly. With file the table is first dumped in a csv file then reloaded in PostgreSQL.
-* hexify is a yaml list with the data types that require coversion in hex (e.g. blob, binary). The conversion happens on the copy and on the replica.
+* copy_mode the allowed values are 'file'  and 'direct'. With 'file' the table is first dumped in a csv file then loaded in PostgreSQL. With 'direct' the copy happens in memory. 
+* hexify lists the data types that require coversion in hex (e.g. blob, binary). The conversion happens on the initial copy and during the replica.
 * log_dir directory where the logs are stored
 * log_level logging verbosity. allowed values are debug, info, warning, error
 * log_dest log destination. stdout for debugging purposes, file for the normal activity.
 * my_charset mysql charset for the copy (please note the replica is always in utf8)
 * pg_charset PostgreSQL connection's charset. 
 * tables_limit yaml list with the tables to replicate. if empty the entire mysql database is replicated.
+* exclude_tables list with the tables to exclude from the initial and copy and replica.
+* email_config email settings for sending the email alerts (e.g. when the replica starts)
+* obfuscation_file path to the obfuscation file 
+* schema_clear the schema with the full replica with data in clear
+* schema_obf the schema with the tables with the obfuscated fields listed in the obfuscation file. the tables not listed are exposed as views selecting from the schema in clear.
+* copy_override list of tables to override the slice size when copying the table. Useful to deal with tables with large row size.
+.. code-block:: yaml
+   
+   
+   copy_override: 
+    foo: 1000
+    bar: 7000
+
+    
 
 MySQL connection parameters
     
@@ -95,11 +107,50 @@ PostgreSQL connection parameters
 
 Obfuscation
 **********************
-** Currently under development **
+The obfuscation file is a simple yaml file listing the table and the fields with the different obfuscation strategy.
+
+the mode normal can hash the entire field or keep an arbitrary number of characters not obfuscated (useful for 
+running joins).
+
+Please note that PostgreSQL should have the extension pg_crypto installed before running the initial copy.
+
+The mode date applies to the timestamps and sets the date to the first of january preserving only the year.
+
+The mode numeric resets the value to 0.
+
+.. code-block:: yaml
+
+
+	---
+	# obfuscate the entire field text_full in table example_01 using SHA256 
+	example_01:
+	    text_full:
+		mode: normal
+		nonhash_start: 0
+		nonhash_length: 0
+
+	# obfuscate the field text_partial in table example_02 using SHA256 preserving the first two characters        
+	example_02:
+	    text_partial:
+		mode: normal
+		nonhash_start: 1
+		nonhash_length: 2
+
+		
+	# obfuscate the field date_field in table example_03 changing the date to the first of january of the given year
+	# e.g. 2015-05-20 -> 2015-01-01
+	example_03:
+	    date_field:
+		mode: date
+	    
+	# obfuscate the field numeric_field (integer, double etc.) in table example_04 to 0
+	example_04:
+	    numeric_field:
+		mode: numeric
 
 Usage
 **********************
-The script pg_chameleon.py have a very basic command line interface. Accepts three commands
+The script ninja.py have a very basic command line interface. Accepts three commands
 
 * drop_schema Drops the schema sch_chameleon with cascade option
 * create_schema Create the schema sch_chameleon
@@ -181,7 +232,7 @@ Setup the connection parameters in config.yaml
     ---
     #global settings
     my_server_id: 100
-    replica_batch_size: 1000
+    replica_batch_size: 10000
     my_database:  sakila
     pg_database: db_replica
 
@@ -194,14 +245,14 @@ Setup the connection parameters in config.yaml
 
     #mysql slave setup
     mysql_conn:
-        host: derpy
+        host: my_test
         port: 3306
         user: usr_replica
         passwd: replica
 
     #postgres connection
     pg_conn:
-        host: derpy
+        host: pg_test
         port: 5432
         user: usr_replica
         password: replica
@@ -232,28 +283,26 @@ The library is being developed on Ubuntu 14.04 with python 2.7.6.
 
 The databases source and target are:
 
-* MySQL: 5.6.32 on Ubuntu Server  14.04
-* PostgreSQL: 9.5.4 on Ubuntu Server  14.04
+* MySQL: 5.6 on Ubuntu Server  14.04
+* PostgreSQL: 9.5 on Ubuntu Server  14.04
   
+  
+
 What does it work
 ..............................
-* Read the schema specifications from MySQL and replicate the same structure it into PostgreSQL
+* Read the schema specifications from MySQL and replicate the same structure into PostgreSQL
 * Locks the tables in mysql and gets the master coordinates
 * Create primary keys and indices on PostgreSQL
-* Write in PostgreSQL frontier table
-
- 
-What does seems to work
-..............................
+* Replay and obfuscate of the replicated data in PostgreSQL
+* Basic DDL Support (CREATE/DROP/ALTER TABLE, DROP PRIMARY KEY)
 * Enum support
-* Blob import into bytea (needs testing)
+* Blob import into bytea 
 * Read replica from MySQL
 * Copy the data from MySQL to PostgreSQL on the fly
-* Replay of the replicated data in PostgreSQL
+* Discards of rubbish data (logged to the process log)
  
-What does'n work
+What doesn't work
 ..............................
-* DDL replica 
-* Materialisation of the MySQL views
-* Foreign keys build on PostgreSQL
-* Obfuscation on the fly
+* Full DDL replica 
+
+
