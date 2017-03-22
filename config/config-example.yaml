@@ -29,8 +29,8 @@ hexify:
     - 'binary'
 
 pid_dir: 'pid/'
-
 log_dir: 'logs/'
+out_dir: '/tmp/'
 log_level: 'debug'
 log_dest: 'stdout'
 log_append: True

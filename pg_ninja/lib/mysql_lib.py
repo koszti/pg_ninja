@@ -121,11 +121,12 @@ class mysql_engine:
 		:param logger: the logger object used to log the messages with different levels
 		:param out_dir: the output directory for the data copy when the copy method is file
 	"""
-	def __init__(self, global_config, logger, out_dir="/tmp/"):
+	def __init__(self, global_config, logger):
 		self.hexify=global_config.hexify
 		self.obfdic=global_config.obfdic
+		
 		self.logger=logger
-		self.out_dir=out_dir
+		self.out_dir=global_config.out_dir
 		self.my_tables={}
 		self.mysql_con=mysql_connection(global_config)
 		try:
@@ -201,14 +202,14 @@ class mysql_engine:
 		log_position=batch_data[0][2]
 		log_table=batch_data[0][3]
 		my_stream = BinLogStreamReader(
-																connection_settings = self.mysql_con.mysql_conn, 
-																server_id =self.mysql_con.my_server_id, 
-																only_events = [RotateEvent, QueryEvent,DeleteRowsEvent, WriteRowsEvent, UpdateRowsEvent], 
-																log_file = log_file, 
-																log_pos = log_position, 
-																resume_stream = True, 
-																only_schemas = [self.mysql_con.my_database]
-														)
+									connection_settings = self.mysql_con.mysql_conn, 
+									server_id =self.mysql_con.my_server_id, 
+									only_events = [RotateEvent, QueryEvent,DeleteRowsEvent, WriteRowsEvent, UpdateRowsEvent], 
+									log_file = log_file, 
+									log_pos = log_position, 
+									resume_stream = True, 
+									only_schemas = [self.mysql_con.my_database]
+							)
 		self.logger.debug("START STREAMING - log_file %s, log_position %s. id_batch: %s " % (log_file, log_position, id_batch))
 		for binlogevent in my_stream:
 			total_events+=1
@@ -673,7 +674,7 @@ class mysql_engine:
 			pg_engine.insert_data(table_name, insert_data , self.my_tables)
 			current_slice=current_slice+1
 	def copy_table_data(self, pg_engine,  limit=10000,  copy_obfuscated=True):
-		out_file='/tmp/output_copy.csv'
+		out_file='%s/output_copy.csv' % self.out_dir
 		self.logger.info("locking the tables")
 		self.lock_tables()
 		for table_name in self.my_tables:
@@ -788,18 +789,13 @@ class mysql_engine:
 
 class mysql_snapshot:
 	def __init__(self, mysql_con, global_config, logger):
-		out_dir="/tmp/"
 		self.hexify=global_config.hexify
 		self.logger=logger
-		self.out_dir=out_dir
+		self.out_dir=global_config.out_dir
 		self.my_tables={}
 		self.my_streamer=None
 		self.mysql_con=mysql_con
-		#self.replica_batch_size=self.mysql_con.replica_batch_size
-		#self.schema_clear=global_config.schema_clear
-		#self.schema_obf=global_config.schema_obf
-		#self.copy_override=global_config.copy_override
-	
+		
 	def print_progress (self, iteration, total, table_name):
 		if total>1:
 			self.logger.info("Table %s copied %s %%" % (table_name, round(100 * float(iteration)/float(total), 1)))
@@ -1044,7 +1040,7 @@ class mysql_snapshot:
 		return columns
 	
 	def copy_table_data(self, pg_engine, snap_data,  limit=10000):
-		out_file='/tmp/output_copy.csv'
+		out_file='%s/output_copy.csv' % self.out_dir
 		for table_name in self.my_tables:
 			slice_insert=[]
 			copy_limit=limit
