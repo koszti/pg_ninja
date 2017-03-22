@@ -60,6 +60,7 @@ class global_config:
 			self.email_config=confdic["email_config"]
 			self.log_append = confdic["log_append"]
 			self.skip_view = confdic["skip_view"]
+			self.out_dir = confdic["out_dir"]
 			if confdic["obfuscation_file"]:
 				obfuscation_file=confdic["obfuscation_file"]
 		except KeyError as missing_key:
@@ -108,6 +109,7 @@ class replica_engine:
 		
 	"""
 	def __init__(self, command):
+		
 		self.global_config=global_config(command)
 		self.logger = logging.getLogger(__name__)
 		self.logger.setLevel(logging.DEBUG)
