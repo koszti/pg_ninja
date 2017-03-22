@@ -48,6 +48,7 @@ class pg_connection:
 
 class pg_engine:
 	def __init__(self, global_config, table_metadata,  logger, sql_dir='sql/'):
+		self.lst_yes = global_config.lst_yes
 		self.logger=logger
 		self.sql_dir=sql_dir
 		self.idx_sequence=0
@@ -56,37 +57,37 @@ class pg_engine:
 		self.pg_conn.connect_db()
 		self.table_metadata=table_metadata
 		self.type_dictionary={
-												'integer':'integer',
-												'mediumint':'bigint',
-												'tinyint':'integer',
-												'smallint':'integer',
-												'int':'integer',
-												'bigint':'bigint',
-												'varchar':'character varying',
-												'text':'text',
-												'char':'character',
-												'datetime':'timestamp without time zone',
-												'date':'date',
-												'time':'time without time zone',
-												'timestamp':'timestamp without time zone',
-												'tinytext':'text',
-												'mediumtext':'text',
-												'longtext':'text',
-												'tinyblob':'bytea',
-												'mediumblob':'bytea',
-												'longblob':'bytea',
-												'blob':'bytea', 
-												'binary':'bytea', 
-												'decimal':'numeric', 
-												'double':'double precision', 
-												'double precision':'double precision', 
-												'float':'float', 
-												'bit':'integer', 
-												'year':'integer', 
-												'enum':'enum', 
-												'set':'text', 
-												'json':'text'
-										}
+			'integer':'integer',
+			'mediumint':'bigint',
+			'tinyint':'integer',
+			'smallint':'integer',
+			'int':'integer',
+			'bigint':'bigint',
+			'varchar':'character varying',
+			'text':'text',
+			'char':'character',
+			'datetime':'timestamp without time zone',
+			'date':'date',
+			'time':'time without time zone',
+			'timestamp':'timestamp without time zone',
+			'tinytext':'text',
+			'mediumtext':'text',
+			'longtext':'text',
+			'tinyblob':'bytea',
+			'mediumblob':'bytea',
+			'longblob':'bytea',
+			'blob':'bytea', 
+			'binary':'bytea', 
+			'decimal':'numeric', 
+			'double':'double precision', 
+			'double precision':'double precision', 
+			'float':'float', 
+			'bit':'integer', 
+			'year':'integer', 
+			'enum':'enum', 
+			'set':'text', 
+			'json':'text'
+		}
 		self.table_ddl={}
 		self.idx_ddl={}
 		self.type_ddl={}
@@ -301,14 +302,16 @@ class pg_engine:
 		
 	def sync_obf_table(self, tab, obfdata):
 		self.logger.info("dropping indices and pkey on table %s in schema %s " % (tab, self.pg_conn.schema_obf))	
-		sql_get_drop="""SELECT 
-									t_drop
-								FROM 
-									sch_chameleon.t_rebuild_idx  
-								WHERE
-									v_table_name=%s
-									AND v_schema_name=%s
-								; """
+		sql_get_drop="""
+					SELECT 
+						t_drop
+					FROM 
+						sch_chameleon.t_rebuild_idx  
+					WHERE
+						v_table_name=%s
+						AND v_schema_name=%s
+					;
+					"""
 		self.pg_conn.pgsql_cur.execute(sql_get_drop, (tab, self.pg_conn.schema_obf))	
 		drop_idx=self.pg_conn.pgsql_cur.fetchall()
 		for drop_stat in drop_idx:
@@ -317,14 +320,15 @@ class pg_engine:
 		self.logger.info("syncronising data for table %s in schema %s " % (tab, self.pg_conn.schema_obf))	
 		self.copy_obf_data(tab, obfdata)
 		self.logger.info("creating indices and pkey on table %s in schema %s " % (tab, self.pg_conn.schema_obf))	
-		sql_get_create="""SELECT 
-									t_create
-								FROM 
-									sch_chameleon.t_rebuild_idx  
-								WHERE
-									v_table_name=%s
-									AND v_schema_name=%s
-								; """
+		sql_get_create="""
+					SELECT 
+						t_create
+					FROM 
+						sch_chameleon.t_rebuild_idx  
+					WHERE
+						v_table_name=%s
+						AND v_schema_name=%s
+					; """
 		self.pg_conn.pgsql_cur.execute(sql_get_create, (tab, self.pg_conn.schema_obf))	
 		create_idx=self.pg_conn.pgsql_cur.fetchall()
 		for create_stat in create_idx:
@@ -1224,13 +1228,26 @@ class pg_engine:
 					self.pg_conn.pgsql_cur.execute(st_vacuum)
 
 	def get_index_def(self, table_limit=None):
+		drp_msg = 'Do you want to clean the existing index definitions in t_index_def?.\n YES/No\n' 
+		if sys.version_info[0] == 3:
+			drop_idx = input(drp_msg)
+		else:
+			drop_idx = raw_input(drp_msg)
+		if drop_idx == 'YES':
+			sql_delete = """ DELETE FROM sch_chameleon.t_index_def;"""
+			self.pg_conn.pgsql_cur.execute(sql_delete)
+		elif drop_idx in self.lst_yes or len(drop_idx) == 0:
+			print('Please type YES all uppercase to confirm')
+			sys.exit()
+		
+		
+		
 		self.logger.info("collecting indices and pk for schema %s" % (self.pg_conn.dest_schema,))
 		table_filter = ""
 		if table_limit:
 			table_filter=self.pg_conn.pgsql_cur.mogrify("WHERE table_name IN  (SELECT unnest(%s)) ", (table_limit, ))
 		
 		sql_get_idx=""" 
-				DELETE FROM sch_chameleon.t_index_def;
 				INSERT INTO sch_chameleon.t_index_def
 					(
 						v_schema,
@@ -1305,21 +1322,23 @@ class pg_engine:
 				WHERE
 					sch.nspname=%s
 				) idx
-		""" + table_filter
+		""" + table_filter +""" ON CONFLICT DO NOTHING"""
 		self.pg_conn.pgsql_cur.execute(sql_get_idx, (self.pg_conn.dest_schema, ))
 		
 	
 	def drop_src_indices(self):
-		sql_idx="""SELECT t_drop FROM  sch_chameleon.t_index_def;"""
+		sql_idx="""SELECT t_drop,v_index FROM  sch_chameleon.t_index_def;"""
 		self.pg_conn.pgsql_cur.execute(sql_idx)
 		idx_drop=self.pg_conn.pgsql_cur.fetchall()
 		for drop_stat in idx_drop:
+			self.logger.info("dropping %s" % (drop_stat[1],))
 			self.pg_conn.pgsql_cur.execute(drop_stat[0])
 			
 	def create_src_indices(self):
-		sql_idx="""SELECT t_create FROM  sch_chameleon.t_index_def"""
+		sql_idx="""SELECT t_create,v_index FROM  sch_chameleon.t_index_def"""
 		self.pg_conn.pgsql_cur.execute(sql_idx)
 		idx_create=self.pg_conn.pgsql_cur.fetchall()
 		for create_stat in idx_create:
+			self.logger.info("creating %s" % (create_stat[1],))
 			self.pg_conn.pgsql_cur.execute(create_stat[0])
 	

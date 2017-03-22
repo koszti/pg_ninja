@@ -32,6 +32,7 @@ class global_config:
 		conffile=open(config_file, 'rb')
 		confdic=yaml.load(conffile.read())
 		conffile.close()
+		self.lst_yes= ['yes',  'Yes', 'y', 'Y']
 		
 		
 		
@@ -63,13 +64,14 @@ class global_config:
 			self.out_dir = confdic["out_dir"]
 			if confdic["obfuscation_file"]:
 				obfuscation_file=confdic["obfuscation_file"]
+			if not os.path.isdir(self.out_dir):
+				print "**FATAL - missing output directory %s. Check the parameter out_dir in your configuration." % (self.out_dir, )
+				sys.exit()
 		except KeyError as missing_key:
 			print "**FATAL - missing parameter %s in configuration file. check config/config-example.yaml for reference" % (missing_key, )
 			sys.exit()
 		
 		self.load_obfuscation(obfuscation_file)
-		
-		
 		
 		
 	def load_obfuscation(self, obfuscation_file):
@@ -114,7 +116,7 @@ class replica_engine:
 		self.logger = logging.getLogger(__name__)
 		self.logger.setLevel(logging.DEBUG)
 		self.logger.propagate = False
-		formatter = logging.Formatter("%(asctime)s: [%(levelname)s] - %(filename)s: %(message)s", "%b %e %H:%M:%S")
+		formatter = logging.Formatter("%(asctime)s: [%(levelname)s] - %(filename)s (%(lineno)s): %(message)s", "%b %e %H:%M:%S")
 		
 		if self.global_config.log_dest=='stdout':
 			fh=logging.StreamHandler(sys.stdout)
