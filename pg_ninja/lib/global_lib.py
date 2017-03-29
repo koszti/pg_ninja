@@ -46,6 +46,7 @@ class global_config:
 			self.schema_clear=confdic["schema_clear"]
 			self.schema_obf=confdic["schema_obf"]
 			self.replica_batch_size=confdic["replica_batch_size"]
+			self.reply_batch_size=confdic["reply_batch_size"]
 			self.tables_limit=confdic["tables_limit"]
 			self.exclude_tables=confdic["exclude_tables"]
 			self.copy_max_size=confdic["copy_max_size"]
