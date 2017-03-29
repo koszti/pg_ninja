@@ -35,6 +35,7 @@ class mysql_connection:
 		self.tables_limit=self.global_conf.tables_limit
 		self.exclude_tables=self.global_conf.exclude_tables
 		self.replica_batch_size=self.global_conf.replica_batch_size
+		self.reply_batch_size=self.global_conf.reply_batch_size
 		self.copy_mode=self.global_conf.copy_mode
 		self.my_connection=None
 		self.my_cursor=None
@@ -136,6 +137,7 @@ class mysql_engine:
 			pass
 		self.my_streamer=None
 		self.replica_batch_size=self.mysql_con.replica_batch_size
+		self.reply_batch_size=self.mysql_con.reply_batch_size
 		self.master_status=[]
 		self.id_batch=None
 		self.schema_clear=global_config.schema_clear
@@ -362,7 +364,7 @@ class mysql_engine:
 					pg_engine.set_batch_processed(id_batch)
 					self.id_batch=None
 		self.logger.debug("replaying batch.")
-		pg_engine.process_batch(self.replica_batch_size)
+		pg_engine.process_batch(self.reply_batch_size)
 		
 
 	

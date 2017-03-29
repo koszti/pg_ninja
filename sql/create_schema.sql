@@ -347,47 +347,47 @@ $BODY$
 		END LOOP;
 		IF v_r_rows IS NULL
 		THEN 
-		    RAISE DEBUG 'v_r_rows: %',v_r_rows.i_id_event; 
-		    v_b_loop=False;
-		    
-		
-		UPDATE sch_chameleon.t_replica_batch  
-			SET 
-				b_replayed=True,
-				ts_replayed=clock_timestamp()
-				
-		WHERE
-			i_id_batch=(
-    			            SELECT 
-    							i_id_batch 
-    						FROM 
-    							sch_chameleon.t_replica_batch  
-    						WHERE 
-    								b_started 
-    							AND 	b_processed 
-    							AND     NOT b_replayed
-    						ORDER BY 
-    							ts_created 
-    						LIMIT 1
-						)
-		
-		RETURNING i_id_batch INTO v_i_id_batch
-		;
-		DELETE FROM sch_chameleon.t_log_replica
-    		    WHERE
-    			    i_id_batch=v_i_id_batch
-    		    ;
-		SELECT 
-			count(*)>0 
-			INTO
-				v_b_loop
-		FROM 
-			sch_chameleon.t_replica_batch  
-		WHERE 
-				b_started 
-			AND 	b_processed 
-			AND     NOT b_replayed
-		;
+			    RAISE DEBUG 'v_r_rows: %',v_r_rows.i_id_event; 
+			    v_b_loop=False;
+			    
+			
+			UPDATE sch_chameleon.t_replica_batch  
+				SET 
+					b_replayed=True,
+					ts_replayed=clock_timestamp()
+					
+			WHERE
+				i_id_batch=(
+					    SELECT 
+								i_id_batch 
+							FROM 
+								sch_chameleon.t_replica_batch  
+							WHERE 
+									b_started 
+								AND 	b_processed 
+								AND     NOT b_replayed
+							ORDER BY 
+								ts_created 
+							LIMIT 1
+							)
+			
+			RETURNING i_id_batch INTO v_i_id_batch
+			;
+			DELETE FROM sch_chameleon.t_log_replica
+			    WHERE
+				    i_id_batch=v_i_id_batch
+			    ;
+			SELECT 
+				count(*)>0 
+				INTO
+					v_b_loop
+			FROM 
+				sch_chameleon.t_replica_batch  
+			WHERE 
+					b_started 
+				AND 	b_processed 
+				AND     NOT b_replayed
+			;
 		
 		END IF;
         RETURN v_b_loop	;
