@@ -142,7 +142,7 @@ class mysql_engine:
 		self.schema_obf=global_config.schema_obf
 		self.copy_override=global_config.copy_override
 		self.sql_token=sql_token()
-		
+		self.stat_skip = ['BEGIN', 'COMMIT']
 			
 	def obfuscate_value(self, column_value, obf_mode, column_data_type):
 		"""
@@ -228,32 +228,33 @@ class mysql_engine:
 					return [master_data, close_batch]
 				
 			elif isinstance(binlogevent, QueryEvent):
-				grp_length = len(group_insert)
-				if len(group_insert)>0:
-					pg_engine.write_batch(group_insert)
-					group_insert=[]
-				self.sql_token.parse_sql(binlogevent.query)
-				
-				for token in self.sql_token.tokenised:
-					if len(token)>0:
-						master_data["File"]=binlogfile
-						master_data["Position"]=binlogevent.packet.log_pos
-						self.logger.debug("CAPTURED QUERY- binlogfile %s, position %s. Lenght group insert: %s \n Query: %s " % (binlogfile, binlogevent.packet.log_pos, grp_length, binlogevent.query))
-						print token
-						query_data={
-									"binlog":log_file, 
-									"logpos":log_position, 
-									"schema": self.schema_clear, 
-									"batch_id":id_batch, 
-									"log_table":log_table
-						}
-						pg_engine.write_ddl(token, query_data)
-						close_batch=True
+				if binlogevent.query.strip().upper() not in self.stat_skip:
+					grp_length = len(group_insert)
+					if len(group_insert)>0:
+						pg_engine.write_batch(group_insert)
+						group_insert=[]
+					self.sql_token.parse_sql(binlogevent.query)
 					
-				self.sql_token.reset_lists()
-				if close_batch:
-					my_stream.close()
-					return [master_data, close_batch]
+					for token in self.sql_token.tokenised:
+						if len(token)>0:
+							master_data["File"]=binlogfile
+							master_data["Position"]=binlogevent.packet.log_pos
+							self.logger.debug("CAPTURED QUERY- binlogfile %s, position %s. Lenght group insert: %s \n Query: %s " % (binlogfile, binlogevent.packet.log_pos, grp_length, binlogevent.query))
+							print token
+							query_data={
+										"binlog":log_file, 
+										"logpos":log_position, 
+										"schema": self.schema_clear, 
+										"batch_id":id_batch, 
+										"log_table":log_table
+							}
+							pg_engine.write_ddl(token, query_data)
+							close_batch=True
+						
+					self.sql_token.reset_lists()
+					if close_batch:
+						my_stream.close()
+						return [master_data, close_batch]
 				
 			else:
 				
