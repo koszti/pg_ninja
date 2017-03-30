@@ -16,7 +16,7 @@ class global_config:
 		configuration values.
 		The class sets the log output file from the parameter command.  If the log destination is stdout then the logfile is ignored
 		
-		:param command: the command specified on the pg_ninja.py command line
+		:param command: the command specified on the ninja.py command line
 	
 	"""
 	def __init__(self,command):
@@ -91,8 +91,7 @@ class global_config:
 	def load_snapshots(self):
 		"""
 			Reads the file with the snapshot definitions.
-			Is used for taking a static snapshot from schemas not replicated.
-			
+			This method  is called when taking a static snapshot from schemas not replicated.
 		"""
 		snpfile=open(self.snapshots_file, 'rb')
 		self.snapdic=yaml.load(snpfile.read())
@@ -102,11 +101,11 @@ class global_config:
 		
 class replica_engine:
 	"""
-		This class acts as bridge between the mysql and postgresql engines. The constructor inits the global configuration
-		class  and setup the mysql and postgresql engines as class objects. 
-		The class setup the logging using the configuration parameter (e.g. log level debug on stdout).
+		This class wraps the interface to the replica operations and bridges mysql and postgresql engines. 
+		The constructor inits the global configuration class  and setup the mysql and postgresql engines as class attributes. 
+		The class initialises the logging using the configuration parameter (e.g. log level debug on stdout).
 		
-		:param command: the command specified on the pg_ninja.py command line
+		:param command: the command specified on the pg_ninja.py command line. This value is used to generate the log filename (see the class global_config).
 		
 	"""
 	def __init__(self, command):
@@ -115,7 +114,7 @@ class replica_engine:
 		self.logger = logging.getLogger(__name__)
 		self.logger.setLevel(logging.DEBUG)
 		self.logger.propagate = False
-		formatter = logging.Formatter("%(asctime)s: [%(levelname)s] - %(filename)s: %(message)s", "%b %e %H:%M:%S")
+		formatter = logging.Formatter("%(asctime)s: [%(levelname)s] - %(filename)s (%(lineno)s): %(message)s", "%b %e %H:%M:%S")
 		
 		if self.global_config.log_dest=='stdout':
 			fh=logging.StreamHandler(sys.stdout)
@@ -143,6 +142,10 @@ class replica_engine:
 	
 	
 	def sync_snapshot(self, snap_item, mysql_conn):
+		"""
+			This method syncronise a snaphost. Requires a valid snapshot name. See the snapshot-example.yaml
+			for the snapshot details.
+		"""
 		snap_data=self.global_config.snapdic[snap_item]
 		try:
 			drop_tables = snap_data["drop_tables"]
@@ -177,6 +180,12 @@ class replica_engine:
 		mysql_conn.disconnect_snapshot()
 	
 	def take_snapshot(self, snapshot):
+		"""
+			method to execute the snapshots stored in the snapshot configuration file (see global_config for the details). 
+			
+			:param snapshot: the snapshot name. if the value is 'all' then the process will loop trough all the snapshots available.
+			
+		"""
 		mysql_conn=mysql_connection(self.global_config)
 		self.global_config.load_snapshots()
 		if snapshot == 'all':
@@ -188,8 +197,12 @@ class replica_engine:
 			except:
 				self.logger.debug("Snapshot %s not present in configuration file"  % snapshot)
 				sys.exit()
+				
+				
 	def wait_for_replica_end(self):
-		""" waiting for replica end"""
+		""" 
+			the method checks if the replica is running using the method check_running every 5 seconds until the replica is stopped.
+		"""
 		while True:
 			replica_running=self.check_running(write_pid=False)
 			if not replica_running:
@@ -197,6 +210,12 @@ class replica_engine:
 			time.sleep(5)
 		
 	def stop_replica(self, allow_restart=True):
+		"""
+			The method creates the exit file then waits for the replica end.
+			
+			:param allow_restart=True: if set to true the exit file is removed when the replica is stopped, allowing the process to restart. 
+			if set to false the exit file is left in place leaving the replica disabled.
+		"""
 		exit=open(self.exit_file, 'w')
 		exit.close()
 		self.wait_for_replica_end()
@@ -204,6 +223,9 @@ class replica_engine:
 			os.remove(self.exit_file)
 	
 	def enable_replica(self):
+		"""
+			the method remove the exit file allowing the replica start
+		"""
 		try:
 			os.remove(self.exit_file)
 			self.logger.info("Replica enabled")
@@ -212,7 +234,13 @@ class replica_engine:
 	
 		
 	def sync_obfuscation(self, send_email=True):
-		"""the function syncronise the obfuscated tables using the obfuscation file """
+		"""
+			the function sync the obfuscated tables using the obfuscation file indicated in the configuration.
+			The replica is stopped and disabled before starting the obfuscation sync.
+			Check README.rst, obfuscation-example.yaml and global_config for the details.
+			
+			:param send_email=True: if true an email is sent when the process is complete.
+		"""
 		self.stop_replica(allow_restart=False)
 		self.pg_eng.sync_obfuscation(self.global_config.obfdic)
 		self.logger.info("Sync complete, replica can be restarted")
@@ -223,9 +251,9 @@ class replica_engine:
 	
 	def  create_schema(self, drop_tables=False):
 		"""
-			Creates the database schema on PostgreSQL using the metadata extracted from MySQL.
+			The method builds a new database schema on PostgreSQL using the metadata extracted from MySQL.
 			
-			:param drop_tables=False:  specifies whether the existing tables should be dropped before creating it.  The default setting is False.
+			:param drop_tables=False:  specifies whether the existing tables should be dropped before creating the schema.  
 		"""
 		self.pg_eng.create_schema()
 		self.logger.info("Importing mysql schema")
@@ -234,13 +262,14 @@ class replica_engine:
 	
 	def create_views(self):
 		"""
-			Creates the views pointing the tables with not obfuscated fields
+			The method creates the views exposing the tables with not obfuscated fields in the obfuscated schema.
 		"""
 		self.pg_eng.create_views(self.global_config.obfdic)
 	
 	def  create_indices(self):
 		"""
-			Creates the indices on the PostgreSQL schema using the metadata extracted from MySQL.
+			The method builds the indices on the PostgreSQL schema using the metadata extracted from MySQL.
+			The DDL are built determining which tables are in the schema in clear only  and which are in both schemas in clear and obfuscated.
 			
 		"""
 		self.pg_eng.build_idx_ddl(self.global_config.obfdic)
@@ -248,29 +277,34 @@ class replica_engine:
 	
 	def create_service_schema(self):
 		"""
-			Creates the service schema sch_chameleon on the PostgreSQL database. The service schema is required for having the replica working correctly.
+			Creates the service schema sch_chameleon on the PostgreSQL database. 
+			The service schema is used by the replica system for tracking the replica status and storing the 
+			replicated row images.
 	
 		"""
 		self.pg_eng.create_service_schema()
 		
 	def upgrade_service_schema(self):
 		"""
-			Upgrade the service schema to the latest version.
+			Migrates the service schema to the latest version if required.
 			
-			:todo: everything!
+			
 		"""
 		self.pg_eng.upgrade_service_schema()
 		
 	def drop_service_schema(self):
 		"""
-			Drops the service schema. The action discards any information relative to the replica.
+			Drops the service schema. This action discards any information relative to the replica.
 
 		"""
 		self.logger.info("Dropping the service schema")
 		self.pg_eng.drop_service_schema()
 		
 	def check_running(self, write_pid=True):
-		""" checks if the process is running. saves the pid file if not """
+		""" 	
+			checks if the replica process is running. saves the pid file if not 
+			:param write_pid=True: specify whether a pid file should be written if the process is missing.
+		"""
 		
 		return_to_os=False 
 		try:
@@ -290,18 +324,25 @@ class replica_engine:
 		return return_to_os
 	
 	def check_request_exit(self):
+		"""
+			checks if the exit file is present. if the exit file  is present  the method removes the pid file and returns
+			true. Otherwise returns false.
+		"""
 		return_to_os=False
-		"""checks for the exit file and terminate the replica if the file is present """
 		if os.path.isfile(self.exit_file):
-			print "exit file detected, removing the pid file and terminating the replica process"
+			print ("exit file detected, removing the pid file and terminating the replica process")
 			os.remove(self.pid_file)
-			print "you shall remove the file %s before starting the replica process " % self.exit_file
+			print ("you shall remove the file %s before starting the replica process " % self.exit_file)
 			return_to_os=True
 		return return_to_os
 		
 	def run_replica(self):
 		"""
-			Runs the replica loop. 
+			This is the main loop replica method.
+			When executed checks if the replica is already running using the method check_running. 
+			The method check_request_exit is also used for determining whether the exit file is present (replica disabled).
+			If the replica is started an email is sent using the class email_alerts.
+			The email configuration is set in the config.yaml file. Check the config-example.yaml for the details.
 		"""
 		if self.check_running() or self.check_request_exit():
 			sys.exit()
@@ -323,14 +364,24 @@ class replica_engine:
 			
 	def copy_table_data(self, copy_obfus=True):
 		"""
-			Copy the data for the replicated tables from mysql to postgres.
-			
-			After the copy the master's coordinates are saved in postgres.
+			The method copies the replicated tables from mysql to postgres.
+			When the copy is finished the master's coordinates are saved in the postgres service schema.
+			The copy locks the tables with FLUSH TABLES WITH READ LOCK; This actually locks in read only mode the mysql database.
+			After the copy is complete the table are unlocked.
 		"""
 		self.my_eng.copy_table_data(self.pg_eng, limit=self.global_config.copy_max_size, copy_obfuscated=copy_obfus)
 		self.pg_eng.save_master_status(self.my_eng.master_status, cleanup=True)
 
 	def init_replica(self):
+		"""
+			This method initialise a fresh replica.
+			It stops the eventually running replica. 
+			Drops and recreate a new service schema.
+			Creates the clear and obfuscated schemas dropping the existing tables.
+			Copies the table data.
+			Create the indices and the views in the obfuscated schema.
+			Enable the replica and sends an email of init_replica complete.
+		"""
 		self.stop_replica(allow_restart=False)
 		self.drop_service_schema()
 		self.create_service_schema()
@@ -343,6 +394,15 @@ class replica_engine:
 		
 	
 	def sync_replica(self):
+		"""
+			This method is similar to the init_replica with some notable exceptions.
+			The tables on postgresql are not dropped. 
+			All indices on the existing tables are dropped for speeding up the reload.
+			The tables are truncated. However if the truncate is not possible a delete and vacuum is executed.
+			The copy table data doesn't copy the obfuscated data.
+			The indices are created using the informations collected in the pg_engine's method get_index_def.
+			The method sync_obfuscation is used to sync the obfuscation in a separate process.
+		"""
 		self.stop_replica(allow_restart=False)
 		self.pg_eng.get_index_def()
 		self.pg_eng.drop_src_indices()
