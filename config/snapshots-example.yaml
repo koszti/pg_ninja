@@ -13,3 +13,4 @@ test:
     tables_limit:
         - table_test
     copy_max_size: 100000
+    drop_tables: False
