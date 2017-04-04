@@ -1121,4 +1121,3 @@ class mysql_snapshot:
 				ins_arg.append(columns_ins)
 				ins_arg.append(copy_limit)
 				self.insert_table_data(pg_engine, ins_arg)
-		
