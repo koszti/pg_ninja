@@ -261,68 +261,69 @@ class mysql_engine:
 			else:
 				
 				for row in binlogevent.rows:
-					total_events+=1
-					log_file=binlogfile
-					log_position=binlogevent.packet.log_pos
-					table_name=binlogevent.table
-					column_map=table_type_map[table_name]
-					
-					
-					global_data={
-										"binlog":log_file, 
-										"logpos":log_position, 
-										"schema": self.schema_clear, 
-										"table": table_name, 
-										"batch_id":id_batch, 
-										"log_table":log_table
-									}
-					event_data={}
-					event_data_obf={}
-					if isinstance(binlogevent, DeleteRowsEvent):
-						global_data["action"] = "delete"
-						event_values=row["values"]
-					elif isinstance(binlogevent, UpdateRowsEvent):
-						global_data["action"] = "update"
-						event_values=row["after_values"]
-					elif isinstance(binlogevent, WriteRowsEvent):
-						global_data["action"] = "insert"
-						event_values=row["values"]
-					global_obf=dict(global_data.items())
-					global_obf["schema"]=self.schema_obf
-					for column_name in event_values:
-						column_data_type=column_map[column_name]
-						column_type=column_data_type["data_type"]
-						if column_type in self.hexify and event_values[column_name]:
-							event_values[column_name]=binascii.hexlify(event_values[column_name])
-					
-					
-					try:
-						obf_list=self.obfdic[table_name]
-						event_values_obf=dict(event_values.items())
-					except:
-						obf_list=None
-						event_values_obf=None
-					
-					if obf_list:
+					if binlogevent.table not in self.mysql_con.exclude_tables:
+						total_events+=1
+						log_file=binlogfile
+						log_position=binlogevent.packet.log_pos
+						table_name=binlogevent.table
+						column_map=table_type_map[table_name]
+
+
+						global_data={
+											"binlog":log_file,
+											"logpos":log_position,
+											"schema": self.schema_clear,
+											"table": table_name,
+											"batch_id":id_batch,
+											"log_table":log_table
+										}
+						event_data={}
+						event_data_obf={}
+						if isinstance(binlogevent, DeleteRowsEvent):
+							global_data["action"] = "delete"
+							event_values=row["values"]
+						elif isinstance(binlogevent, UpdateRowsEvent):
+							global_data["action"] = "update"
+							event_values=row["after_values"]
+						elif isinstance(binlogevent, WriteRowsEvent):
+							global_data["action"] = "insert"
+							event_values=row["values"]
+						global_obf=dict(global_data.items())
+						global_obf["schema"]=self.schema_obf
+						for column_name in event_values:
+							column_data_type=column_map[column_name]
+							column_type=column_data_type["data_type"]
+							if column_type in self.hexify and event_values[column_name]:
+								event_values[column_name]=binascii.hexlify(event_values[column_name])
+
+
 						try:
-							for column_name in obf_list:
-								obf_mode=obf_list[column_name]
-								event_values_obf[column_name]=self.obfuscate_value(event_values_obf[column_name], obf_mode, column_data_type)
+							obf_list=self.obfdic[table_name]
+							event_values_obf=dict(event_values.items())
 						except:
-							self.logger.error("discarded row in obfuscation process.\n global_data:%s \n event_data:%s \n" % (global_data,event_values ))
-							
-					event_data = dict(event_data.items() +event_values.items())
-					event_insert={"global_data":global_data,"event_data":event_data}
-					group_insert.append(event_insert)
-					
-					if event_values_obf:
-						event_data_obf = dict(event_data_obf.items() +event_values_obf.items())
-						event_obf={"global_data":global_obf,"event_data":event_data_obf }
-						group_insert.append(event_obf)
-							
-					
-					master_data["File"]=log_file
-					master_data["Position"]=log_position
+							obf_list=None
+							event_values_obf=None
+
+						if obf_list:
+							try:
+								for column_name in obf_list:
+									obf_mode=obf_list[column_name]
+									event_values_obf[column_name]=self.obfuscate_value(event_values_obf[column_name], obf_mode, column_data_type)
+							except:
+								self.logger.error("discarded row in obfuscation process.\n global_data:%s \n event_data:%s \n" % (global_data,event_values ))
+
+						event_data = dict(event_data.items() +event_values.items())
+						event_insert={"global_data":global_data,"event_data":event_data}
+						group_insert.append(event_insert)
+
+						if event_values_obf:
+							event_data_obf = dict(event_data_obf.items() +event_values_obf.items())
+							event_obf={"global_data":global_obf,"event_data":event_data_obf }
+							group_insert.append(event_obf)
+
+
+						master_data["File"]=log_file
+						master_data["Position"]=log_position
 					if total_events>=self.replica_batch_size:
 						self.logger.debug("total events exceeded. Master data: %s  " % (master_data,  ))
 						total_events=0
