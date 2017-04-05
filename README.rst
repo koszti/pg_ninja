@@ -288,7 +288,7 @@ The databases source and target are:
   
   
 
-What does it work
+What does work
 ..............................
 * Read the schema specifications from MySQL and replicate the same structure into PostgreSQL
 * Locks the tables in mysql and gets the master coordinates
