@@ -19,7 +19,7 @@ obfuscation_file:
 skip_view:
 
 
-copy_mode: 'file' 
+copy_mode: 'file'
 #copy_mode: 'direct'
 
 hexify: 
