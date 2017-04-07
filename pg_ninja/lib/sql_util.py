@@ -129,23 +129,26 @@ class sql_token(object):
 		m_inner=self.m_inner.search(sql_create)
 		inner_stat=m_inner.group(1).strip()
 		table_dic={}
+		#remove any key or index definition from the inner statement, we'll parse them in a separate method
 		column_list=self.m_pkeys.sub( '', inner_stat)
 		column_list=self.m_keys.sub( '', column_list)
 		column_list=self.m_idx.sub( '', column_list)
 		column_list=self.m_fkeys.sub( '', column_list)
 		
+		#build the index dictionary and add it to the table_dic["indices"]
 		table_dic["indices"]=self.build_key_dic(inner_stat, table_name)
 		#print table_dic["indices"]
 		#column_list=self.m_dbl_dgt.sub(r"\2|\3",column_list)
 		mpars=self.m_pars.findall(column_list)
 		for match in mpars:
+			#replace the commas with pipes in the dimension list so we can rematch without risk of false positive
 			new_group=str(match[0]).replace(',', '|')
 			column_list=column_list.replace(match[0], new_group)
+		#add a trailing comma used by the column's regular expression as definition's separator
 		column_list=column_list+","
-		#print column_list
+		
+		#build the column dictionary and add it to the table_dic["columns"]
 		table_dic["columns"]=self.build_column_dic(column_list)
-		#for item in table_dic["columns"]:
-		#	print item
 		return table_dic	
 	
 	def parse_alter_table(self, malter_table):
@@ -212,15 +215,17 @@ class sql_token(object):
 	def parse_sql(self, sql_string):
 		"""
 			Splits the sql string in statements using the conventional end of statement marker ;
-			A regular expression greps the words and parentesis and a split converts them in
-			a list. Each list of words is then stored in the list token_list.
+			A regular expression greps the words and parentesis and a split them in
+			a list. Each token is then stored in the list token_list.
 			
 			:param sql_string: The sql string with the sql statements.
 		"""
+		#remove any default value
 		sql_string=re.sub(r'\s+default(.*?),', ' ', sql_string, re.IGNORECASE)
+		# split the statement using ;
 		statements=sql_string.split(';')
 		for statement in statements:
-			
+			#cleanup the stat and normalise it to one row
 			stat_dic={}
 			stat_cleanup=re.sub(r'/\*.*?\*/', '', statement, re.DOTALL)
 			stat_cleanup=re.sub(r'--.*?\n', '', stat_cleanup)
@@ -230,14 +235,16 @@ class sql_token(object):
 			stat_cleanup=stat_cleanup.replace('\n', ' ')
 			stat_cleanup=re.sub("\([\w*\s*]\)", " ",  stat_cleanup)
 			stat_cleanup=stat_cleanup.strip()
+			#determine which regexp matches the statement
 			mcreate_table=self.m_create_table.match(stat_cleanup)
 			mdrop_table=self.m_drop_table.match(stat_cleanup)
 			malter_table=self.m_alter_table.match(stat_cleanup)
 			malter_index=self.m_alter_index.match(stat_cleanup)
 			mdrop_primary=self.m_drop_primary.match(stat_cleanup)
 			
-			#print stat_cleanup
+			#print (stat_cleanup)
 			if mcreate_table:
+				#use the capture group 1 to get the command (CREATE TABLE)
 				command=' '.join(mcreate_table.group(1).split()).upper().strip()
 				stat_dic["command"]=command
 				stat_dic["name"]=mcreate_table.group(2)
@@ -245,19 +252,24 @@ class sql_token(object):
 				stat_dic["columns"]=create_parsed["columns"]
 				stat_dic["indices"]=create_parsed["indices"]				
 			elif mdrop_table:
+				#use the capture group 1 to get the command (DROP TABLE) and group 2 to get the table name
 				command=' '.join(mdrop_table.group(1).split()).upper().strip()
 				stat_dic["command"]=command
 				stat_dic["name"]=mdrop_table.group(2)
 			elif mdrop_primary:
+				#set the command for the primary key's drop and the group 2
 				stat_dic["command"]="DROP PRIMARY KEY"
 				stat_dic["name"]=mdrop_primary.group(1).strip().strip(',').replace('`', '').strip()
 			elif malter_index:
+				#skip any alter index, we don't manage it
 				pass
 			elif malter_table:
+				#manage the alter tabled parsing the command
 				stat_dic=self.parse_alter_table(malter_table)
 				if len(stat_dic["alter_cmd"]) == 0:
 					stat_dic = {}
 				
 			if stat_dic!={}:
+				# add the tokenised statemtnt to the list only  if the statement dictionary stat_dic is set 
 				self.tokenised.append(stat_dic)
 		
