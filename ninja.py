@@ -13,9 +13,16 @@ commands = [
 	]
 command_help = 'Available commands, ' + ','.join(commands)
 
-parser = argparse.ArgumentParser(description='Command line for pg_chameleon.')
+
+table_help =  'Specify the table\'s name to sync. Multiple tables can be specified separated by comma. If omitted all tables will be syncronised.' 
+snap_help = 'Specify the snapshost name to process. If omitted all configurations will be processed'
+
+parser = argparse.ArgumentParser(description='Command line for pg_chameleon.',  add_help=True)
 parser.add_argument('command', metavar='command', type=str, help=command_help)
-parser.add_argument('--snapshot', metavar='snapshot', type=str,  default='all',  required=False)
+parser.add_argument('--config', metavar='config', type=str,  default='default',  required=False)
+parser.add_argument('--table', metavar='table', type=str,  default='*',  required=False, help=table_help)
+parser.add_argument('--snapshot', metavar='snapshot', type=str,  default='all',  required=False,  help=snap_help)
+
 args = parser.parse_args()
 
 if args.command in commands:
