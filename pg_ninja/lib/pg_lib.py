@@ -99,7 +99,6 @@ class pg_engine:
 		]
 		cat_version=self.get_schema_version()
 		num_schema=(self.check_service_schema())[0]
-		print('cat_version %s  self.cat_version %s' % (cat_version, self.cat_version))
 		if cat_version!=self.cat_version and int(num_schema)>0:
 			self.upgrade_service_schema()
 	
@@ -760,8 +759,6 @@ class pg_engine:
 		self.logger.info("Upgrading the service schema")
 		install_script=False
 		cat_version=self.get_schema_version()
-		print('cat_version %s  self.cat_version %s' % (cat_version, self.cat_version))
-		print('=======================================')
 		for install in self.cat_sql:
 			script_ver=install["version"]
 			script_schema=install["script"]
@@ -772,7 +769,25 @@ class pg_engine:
 				sql_schema=file_schema.read()
 				file_schema.close()
 				self.pg_conn.pgsql_cur.execute(sql_schema)
-			
+				if script_ver=='0.9':
+						sql_update="""
+							UPDATE sch_chameleon.t_sources
+							SET
+								t_dest_schema=%s,
+								t_obf_schema=%s
+							WHERE i_id_source=(
+												SELECT 
+													i_id_source
+												FROM
+													sch_chameleon.t_sources
+												WHERE
+													t_source='default'
+													AND t_dest_schema='default'
+													AND t_obf_schema='default'
+											)
+							;
+						"""
+						self.pg_conn.pgsql_cur.execute(sql_update, (self.pg_conn.dest_schema,self.pg_conn.schema_obf ))
 			if script_ver==cat_version and not install_script:
 				self.logger.info("enabling install script")
 				install_script=True
@@ -1180,7 +1195,6 @@ class pg_engine:
 				
 			except:
 				self.logger.info("truncate failed, fallback to delete on table %s" % (tab_name,))
-				print tab_name
 				self.pg_conn.pgsql_cur.execute(st_delete)
 				self.logger.info("running vacuum on table %s" % (tab_name,))
 				self.pg_conn.pgsql_cur.execute(st_vacuum)

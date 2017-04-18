@@ -50,6 +50,9 @@ if args.command in commands:
 		replica.sync_obfuscation()
 	elif args.command == commands[7]:
 		replica.sync_replica()
+	elif args.command == commands[8]:
+		replica.add_source()
+		
 
 else:
 	print command_help
