@@ -1358,3 +1358,21 @@ class pg_engine:
 		sql_delete = """ DELETE FROM sch_chameleon.t_sources 
 					WHERE  t_source=%s; """
 		self.pg_conn.pgsql_cur.execute(sql_delete, (source_name, ))
+	
+	def get_source_status(self, source_name):
+		sql_source = """
+					SELECT 
+						enm_status
+					FROM 
+						sch_chameleon.t_sources 
+					WHERE 
+						t_source=%s
+				;
+			"""
+		self.pg_conn.pgsql_cur.execute(sql_source, (source_name, ))
+		source_data = self.pg_conn.pgsql_cur.fetchone()
+		if source_data:
+			source_status = source_data[0]
+		else:
+			source_status = 'Not registered'
+		return source_status

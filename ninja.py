@@ -12,6 +12,7 @@ commands = [
 	'sync_replica', 
 	'add_source', 
 	'drop_source', 
+	'list_config', 
 	'stop_replica', 
 	'disable_replica', 
 	'enable_replica', 
@@ -54,6 +55,8 @@ if args.command in commands:
 		replica.add_source()
 	elif args.command == commands[9]:
 		replica.drop_source()
+	elif args.command == commands[10]:
+		replica.list_config()
 		
 
 else:

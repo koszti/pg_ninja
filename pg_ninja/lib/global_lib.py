@@ -4,6 +4,7 @@ import sys
 import os
 import time
 import logging
+from tabulate import tabulate
 from logging.handlers  import TimedRotatingFileHandler
 from datetime import datetime
 
@@ -29,9 +30,13 @@ class global_config(object):
 		config_file = '%s/%s.yaml' % (config_dir, config_name)
 		obfuscation_file='config/obfuscation.yaml'
 		self.snapshots_file='config/snapshots.yaml'
-		if not os.path.isfile(config_file):
-			print "**FATAL - configuration file missing **\ncopy config/config-example.yaml to "+config_file+" and set your connection settings."
-			sys.exit()
+		if os.path.isfile(config_file):
+			self.config_name = config_name
+			self.config_dir = config_dir
+		else:
+			print("**FATAL - could not find the configuration file %s.yaml in %s"  % (config_name, config_dir))
+			sys.exit(2)
+		
 		conffile=open(config_file, 'rb')
 		confdic=yaml.load(conffile.read())
 		conffile.close()
@@ -101,7 +106,26 @@ class global_config(object):
 		self.snapdic=yaml.load(snpfile.read())
 		snpfile.close()
 		
-
+	def get_source_name(self, config_name = 'default'):
+		"""
+		The method tries to set the parameter source_name determined from the configuration file.
+		The value is used to query the replica catalog in order to get the source sstatus in method list_config().
+		
+		:param config_name: the configuration file to use. If omitted is set to default.
+		"""
+		
+		config_file = '%s/%s.yaml' % (self.config_dir, config_name)
+		self.config_name = config_name
+		if os.path.isfile(config_file):
+			conffile = open(config_file, 'rb')
+			confdic = yaml.load(conffile.read())
+			conffile.close()
+			try:
+				source_name=confdic["source_name"]
+			except:
+				print('FATAL - missing parameter source name in config file %s' % config_file)
+				source_name='NOT CONFIGURED'
+		return source_name
 		
 class replica_engine(object):
 	"""
@@ -439,3 +463,28 @@ class replica_engine(object):
 		elif drop_src in  self.lst_yes:
 			print('Please type YES all uppercase to confirm')
 		sys.exit()
+	def list_config(self):
+		"""
+			List the available configurations stored in config/
+		"""
+		lst_skip = [
+			'config-example',  
+			'obfuscation-example',  
+			'snapshots-example', 
+			'obfuscation'
+		]
+		list_config = (os.listdir(self.global_config.config_dir))
+		tab_headers = ['Config file',  'Source name',  'Status']
+		tab_body = []
+		
+		for file in list_config:
+			lst_file = file.split('.')
+			file_name = lst_file[0]
+			file_ext = lst_file[1]
+			if file_ext == 'yaml' and file_name not in lst_skip:
+				source_name = self.global_config.get_source_name(file_name)
+				source_status = self.pg_eng.get_source_status(source_name)
+				tab_row = [  '%s.%s' % (file_name, file_ext), source_name, source_status]
+				tab_body.append(tab_row)
+		print(tabulate(tab_body, headers=tab_headers))
+	
