@@ -56,55 +56,50 @@ class pg_engine:
 		self.pg_conn.connect_db()
 		self.table_metadata=table_metadata
 		self.type_dictionary={
-												'integer':'integer',
-												'mediumint':'bigint',
-												'tinyint':'integer',
-												'smallint':'integer',
-												'int':'integer',
-												'bigint':'bigint',
-												'varchar':'character varying',
-												'text':'text',
-												'char':'character',
-												'datetime':'timestamp without time zone',
-												'date':'date',
-												'time':'time without time zone',
-												'timestamp':'timestamp without time zone',
-												'tinytext':'text',
-												'mediumtext':'text',
-												'longtext':'text',
-												'tinyblob':'bytea',
-												'mediumblob':'bytea',
-												'longblob':'bytea',
-												'blob':'bytea', 
-												'binary':'bytea', 
-												'decimal':'numeric', 
-												'double':'double precision', 
-												'double precision':'double precision', 
-												'float':'float', 
-												'bit':'integer', 
-												'year':'integer', 
-												'enum':'enum', 
-												'set':'text', 
-												'json':'text'
-										}
+			'integer':'integer',
+			'mediumint':'bigint',
+			'tinyint':'integer',
+			'smallint':'integer',
+			'int':'integer',
+			'bigint':'bigint',
+			'varchar':'character varying',
+			'text':'text',
+			'char':'character',
+			'datetime':'timestamp without time zone',
+			'date':'date',
+			'time':'time without time zone',
+			'timestamp':'timestamp without time zone',
+			'tinytext':'text',
+			'mediumtext':'text',
+			'longtext':'text',
+			'tinyblob':'bytea',
+			'mediumblob':'bytea',
+			'longblob':'bytea',
+			'blob':'bytea', 
+			'binary':'bytea', 
+			'decimal':'numeric', 
+			'double':'double precision', 
+			'double precision':'double precision', 
+			'float':'float', 
+			'bit':'integer', 
+			'year':'integer', 
+			'enum':'enum', 
+			'set':'text', 
+			'json':'text'
+		}
 		self.table_ddl={}
 		self.idx_ddl={}
 		self.type_ddl={}
 		self.pg_charset=self.pg_conn.pg_charset
-		self.cat_version='0.8'
+		self.cat_version='0.9'
 		self.cat_sql=[
-									{'version':'base','script': 'create_schema.sql'}, 
-									{'version':'0.1','script': 'upgrade/cat_0.1.sql'}, 
-									{'version':'0.2','script': 'upgrade/cat_0.2.sql'}, 
-									{'version':'0.3','script': 'upgrade/cat_0.3.sql'}, 
-									{'version':'0.4','script': 'upgrade/cat_0.4.sql'}, 
-									{'version':'0.5','script': 'upgrade/cat_0.5.sql'}, 
-									{'version':'0.6','script': 'upgrade/cat_0.6.sql'}, 
-									{'version':'0.7','script': 'upgrade/cat_0.7.sql'}, 
-									{'version':'0.8','script': 'upgrade/cat_0.8.sql'}, 
-							]
+			{'version':'base','script': 'create_schema.sql'}, 
+			{'version':'0.8','script': 'upgrade/cat_0.8.sql'}, 
+			{'version':'0.9','script': 'upgrade/cat_0.9.sql'}, 
+		]
 		cat_version=self.get_schema_version()
 		num_schema=(self.check_service_schema())[0]
+		print('cat_version %s  self.cat_version %s' % (cat_version, self.cat_version))
 		if cat_version!=self.cat_version and int(num_schema)>0:
 			self.upgrade_service_schema()
 	
@@ -743,12 +738,12 @@ class pg_engine:
 			Gets the service schema version.
 		"""
 		sql_check="""
-							SELECT 
-											t_version
-							FROM 
-											sch_chameleon.v_version 
-							;
-						"""
+			SELECT 
+				t_version
+			FROM 
+				sch_chameleon.v_version 
+			;
+		"""
 		try:
 			self.pg_conn.pgsql_cur.execute(sql_check)
 			value_check=self.pg_conn.pgsql_cur.fetchone()
@@ -765,23 +760,23 @@ class pg_engine:
 		self.logger.info("Upgrading the service schema")
 		install_script=False
 		cat_version=self.get_schema_version()
-			
+		print('cat_version %s  self.cat_version %s' % (cat_version, self.cat_version))
+		print('=======================================')
 		for install in self.cat_sql:
-				script_ver=install["version"]
-				script_schema=install["script"]
-				self.logger.info("script schema %s, detected schema version %s - install_script:%s " % (script_ver, cat_version, install_script))
-				if install_script==True:
-					self.logger.info("Installing file version %s" % (script_ver, ))
-					file_schema=open(self.sql_dir+script_schema, 'rb')
-					sql_schema=file_schema.read()
-					file_schema.close()
-					self.pg_conn.pgsql_cur.execute(sql_schema)
+			script_ver=install["version"]
+			script_schema=install["script"]
+			self.logger.info("script schema %s, detected schema version %s - target version: %s - install_script:%s " % (script_ver, cat_version, self.cat_version,  install_script))
+			if install_script==True:
+				self.logger.info("Installing file version %s" % (script_ver, ))
+				file_schema=open(self.sql_dir+script_schema, 'rb')
+				sql_schema=file_schema.read()
+				file_schema.close()
+				self.pg_conn.pgsql_cur.execute(sql_schema)
+			
+			if script_ver==cat_version and not install_script:
+				self.logger.info("enabling install script")
+				install_script=True
 				
-				
-				if script_ver==cat_version and not install_script:
-					self.logger.info("enabling install script")
-					install_script=True
-					
 	def check_service_schema(self):
 		sql_check="""
 								SELECT 

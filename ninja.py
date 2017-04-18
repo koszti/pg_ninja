@@ -2,14 +2,21 @@
 import argparse
 from pg_ninja import replica_engine
 commands = [
-					'create_schema',
-					'init_replica',
-					'start_replica',
-					'upgrade_schema',
-					'drop_schema', 
-					'take_snapshots', 
-					'sync_obfuscation', 
-					'sync_replica'
+	'create_schema',
+	'init_replica',
+	'start_replica',
+	'upgrade_schema',
+	'drop_schema', 
+	'take_snapshots', 
+	'sync_obfuscation', 
+	'sync_replica', 
+	'add_source', 
+	'drop_source', 
+	'stop_replica', 
+	'disable_replica', 
+	'enable_replica', 
+	'show_status' , 
+	'detach_replica'
 	]
 command_help = 'Available commands, ' + ','.join(commands)
 
