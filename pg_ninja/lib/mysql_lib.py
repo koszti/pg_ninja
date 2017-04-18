@@ -677,6 +677,7 @@ class mysql_engine:
 			insert_data =  self.mysql_con.my_cursor_fallback.fetchall()
 			pg_engine.insert_data(table_name, insert_data , self.my_tables)
 			current_slice=current_slice+1
+	
 	def copy_table_data(self, pg_engine,  limit=10000,  copy_obfuscated=True):
 		out_file='%s/output_copy.csv' % self.out_dir
 		self.logger.info("locking the tables")

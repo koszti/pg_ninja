@@ -495,7 +495,7 @@ class pg_engine:
 					AND table_name not in (SELECT unnest(%s))
 					;
 				"""
-		self.pg_conn.pgsql_cur.execute(sql_create, (self.pg_conn.schema_obf, self.pg_conn.dest_schema, table_obf, ))
+		self.pg_conn.pgsql_cur.execute(sql_create, (self.obf_schema, self.dest_schema, table_obf, ))
 		create_views=self.pg_conn.pgsql_cur.fetchall()
 		for statement in create_views:
 			try:
@@ -503,7 +503,7 @@ class pg_engine:
 			except psycopg2.Error as e:
 				if e.pgcode == '42809':
 					self.logger.info("replacing table %s in schema %s with a view. old table is renamed to %s_bak" % (self.pg_conn.schema_obf, statement[2],   statement[1]))
-					sql_rename="""ALTER TABLE "%s"."%s" RENAME TO "%s_bak" ;""" % (self.pg_conn.schema_obf,  statement[1], statement[1])
+					sql_rename="""ALTER TABLE "%s"."%s" RENAME TO "%s_bak" ;""" % (self.obf_schema,  statement[1], statement[1])
 					self.pg_conn.pgsql_cur.execute(sql_rename)
 					self.pg_conn.pgsql_cur.execute(statement[0])
 				else:
@@ -527,11 +527,11 @@ class pg_engine:
 	
 	def create_schema(self):
 		
-		if self.pg_conn.schema_obf:
-			sql_schema=" CREATE SCHEMA IF NOT EXISTS "+self.pg_conn.schema_obf+";"
+		if self.obf_schema:
+			sql_schema=" CREATE SCHEMA IF NOT EXISTS "+self.dest_schema+";"
 			self.pg_conn.pgsql_cur.execute(sql_schema)
-		sql_schema=" CREATE SCHEMA IF NOT EXISTS "+self.pg_conn.dest_schema+";"
-		sql_path=" SET search_path="+self.pg_conn.dest_schema+";"
+		sql_schema=" CREATE SCHEMA IF NOT EXISTS "+self.dest_schema+";"
+		sql_path=" SET search_path="+self.dest_schema+";"
 		self.pg_conn.pgsql_cur.execute(sql_schema)
 		self.pg_conn.pgsql_cur.execute(sql_path)
 	
@@ -541,6 +541,7 @@ class pg_engine:
 			if index["index_name"]=="PRIMARY":
 				sql_insert=""" INSERT INTO sch_chameleon.t_replica_tables 
 										(
+											i_id_source,
 											v_table_name,
 											v_schema_name,
 											v_table_pkey
@@ -548,16 +549,18 @@ class pg_engine:
 										VALUES (
 														%s,
 														%s,
+														%s,
 														ARRAY[%s]
 													)
-										ON CONFLICT (v_table_name,v_schema_name)
+										ON CONFLICT (i_id_source,v_table_name,v_schema_name)
 											DO UPDATE 
 												SET v_table_pkey=EXCLUDED.v_table_pkey
 										;
 								"""
-				
-				self.pg_conn.pgsql_cur.execute(sql_insert, (table_name, self.pg_conn.dest_schema, index["index_columns"].strip()))	
-				self.pg_conn.pgsql_cur.execute(sql_insert, (table_name, self.pg_conn.schema_obf, index["index_columns"].strip()))	
+				self.pg_conn.pgsql_cur.execute(sql_insert, (self.i_id_source, table_name, self.dest_schema, index["index_columns"].strip()))	
+				self.pg_conn.pgsql_cur.execute(sql_insert, (self.i_id_source, table_name, self.obf_schema, index["index_columns"].strip()))	
+	
+		
 	
 	def unregister_table(self, table_name):
 		self.logger.info("unregistering table %s from the replica catalog" % (table_name,))
@@ -636,8 +639,9 @@ class pg_engine:
 		column_copy=[]
 		for column in my_tables[table]["columns"]:
 			column_copy.append('"'+column["column_name"]+'"')
-		sql_copy="COPY "+'"'+self.pg_conn.dest_schema+'"'+"."+'"'+table+'"'+" ("+','.join(column_copy)+") FROM STDIN WITH NULL 'NULL' CSV QUOTE '\"' DELIMITER',' ESCAPE '\"' ; "
+		sql_copy="COPY "+'"'+self.dest_schema+'"'+"."+'"'+table+'"'+" ("+','.join(column_copy)+") FROM STDIN WITH NULL 'NULL' CSV QUOTE '\"' DELIMITER',' ESCAPE '\"' ; "
 		self.pg_conn.pgsql_cur.copy_expert(sql_copy,csv_file)
+	
 		
 	def insert_data(self, table,  insert_data,  my_tables={}):
 		column_copy=[]
@@ -849,6 +853,8 @@ class pg_engine:
 											
 									FROM
 											sch_chameleon.t_replica_batch
+									WHERE 
+										i_id_source=%s
 									)
 									UNION ALL
 									(
@@ -862,7 +868,7 @@ class pg_engine:
 								) tab
 						;
 					"""
-		self.pg_conn.pgsql_cur.execute(sql_tab_log)
+		self.pg_conn.pgsql_cur.execute(sql_tab_log, (self.i_id_source, ))
 		results = self.pg_conn.pgsql_cur.fetchone()
 		table_file = results[0]
 		master_data = master_status[0]
@@ -876,11 +882,13 @@ class pg_engine:
 		sql_master="""
 							INSERT INTO sch_chameleon.t_replica_batch
 															(
+																i_id_source,
 																t_binlog_name, 
 																i_binlog_position,
 																v_log_table
 															)
 												VALUES (
+																%s,
 																%s,
 																%s,
 																%s
@@ -890,20 +898,32 @@ class pg_engine:
 							;
 						"""
 						
-		self.logger.info("saving master data  log file: %s  log position:%s Last event: %s" % (binlog_name, binlog_position, event_time))
+		sql_event="""UPDATE sch_chameleon.t_sources 
+					SET 
+						ts_last_event=%s 
+					WHERE 
+						i_id_source=%s; 
+						"""
+		self.logger.info("saving master data id source: %s log file: %s  log position:%s Last event: %s" % (self.i_id_source, binlog_name, binlog_position, event_time))
 		
 		
 		try:
 			if cleanup:
-				self.logger.info("cleaning not replayed batches ")
-				sql_cleanup=""" DELETE FROM sch_chameleon.t_replica_batch WHERE NOT b_replayed; """
-				self.pg_conn.pgsql_cur.execute(sql_cleanup)
-			self.pg_conn.pgsql_cur.execute(sql_master, (binlog_name, binlog_position, table_file))
+				self.logger.info("cleaning not replayed batches for source %s", self.i_id_source)
+				sql_cleanup=""" DELETE FROM sch_chameleon.t_replica_batch WHERE i_id_source=%s AND NOT b_replayed; """
+				self.pg_conn.pgsql_cur.execute(sql_cleanup, (self.i_id_source, ))
+			self.pg_conn.pgsql_cur.execute(sql_master, (self.i_id_source, binlog_name, binlog_position, table_file))
 			results=self.pg_conn.pgsql_cur.fetchone()
 			next_batch_id=results[0]
 		except psycopg2.Error as e:
 					self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
-					self.logger.error(self.pg_conn.pgsql_cur.mogrify(sql_master, ( binlog_name, binlog_position, table_file)))
+					self.logger.error(self.pg_conn.pgsql_cur.mogrify(sql_master, (self.i_id_source, binlog_name, binlog_position, table_file)))
+		try:
+			self.pg_conn.pgsql_cur.execute(sql_event, (event_time, self.i_id_source, ))
+			
+		except psycopg2.Error as e:
+					self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
+					self.pg_conn.pgsql_cur.mogrify(sql_event, (event_time, self.i_id_source, ))
 		
 		return next_batch_id
 		
@@ -1395,3 +1415,32 @@ class pg_engine:
 		self.pg_conn.pgsql_cur.execute(sql_status)
 		results = self.pg_conn.pgsql_cur.fetchall()
 		return results
+		
+	def set_source_id(self, source_status):
+		sql_source = """
+					UPDATE sch_chameleon.t_sources
+					SET
+						enm_status=%s
+					WHERE
+						t_source=%s
+					RETURNING i_id_source,t_dest_schema,t_obf_schema
+				;
+			"""
+		source_name=self.pg_conn.global_conf.source_name
+		self.pg_conn.pgsql_cur.execute(sql_source, (source_status, source_name))
+		source_data=self.pg_conn.pgsql_cur.fetchone()
+		try:
+			self.i_id_source=source_data[0]
+			self.dest_schema=source_data[1]
+			self.obf_schema=source_data[2]
+		except:
+			print("Source %s is not registered." % source_name)
+			sys.exit()
+	
+			
+	def clean_batch_data(self):
+		sql_delete="""DELETE FROM sch_chameleon.t_replica_batch 
+								WHERE i_id_source=%s;
+							"""
+		self.pg_conn.pgsql_cur.execute(sql_delete, (self.i_id_source, ))
+	

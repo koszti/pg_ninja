@@ -387,7 +387,6 @@ class replica_engine(object):
 				sys.exit()
 			
 		
-			
 	def copy_table_data(self, copy_obfus=True):
 		"""
 			The method copies the replicated tables from mysql to postgres.
@@ -409,14 +408,16 @@ class replica_engine(object):
 			Enable the replica and sends an email of init_replica complete.
 		"""
 		self.stop_replica(allow_restart=False)
-		self.drop_service_schema()
-		self.create_service_schema()
+		self.pg_eng.set_source_id('initialising')
+		self.pg_eng.clean_batch_data()
 		self.create_schema(drop_tables=True)
 		self.copy_table_data()
 		self.create_indices()
 		self.create_views()
+		self.pg_eng.set_source_id('initialised')
 		self.enable_replica()
 		self.email_alerts.send_end_init_replica()
+		
 		
 	
 	def sync_replica(self):
@@ -488,6 +489,7 @@ class replica_engine(object):
 				tab_row = [  '%s.%s' % (file_name, file_ext), source_name, source_status]
 				tab_body.append(tab_row)
 		print(tabulate(tab_body, headers=tab_headers))
+		
 	def show_status(self):
 		"""
 			list the replica status using the configuration files and the replica catalogue
