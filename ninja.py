@@ -52,6 +52,8 @@ if args.command in commands:
 		replica.sync_replica()
 	elif args.command == commands[8]:
 		replica.add_source()
+	elif args.command == commands[9]:
+		replica.drop_source()
 		
 
 else:

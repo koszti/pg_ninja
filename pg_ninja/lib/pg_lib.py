@@ -1354,4 +1354,7 @@ class pg_engine:
 		else:
 			print("Source %s already registered." % source_name)
 		sys.exit()
-	
+	def drop_source(self, source_name):
+		sql_delete = """ DELETE FROM sch_chameleon.t_sources 
+					WHERE  t_source=%s; """
+		self.pg_conn.pgsql_cur.execute(sql_delete, (source_name, ))
