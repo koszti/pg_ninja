@@ -431,12 +431,14 @@ class replica_engine(object):
 			The method sync_obfuscation is used to sync the obfuscation in a separate process.
 		"""
 		self.stop_replica(allow_restart=False)
+		self.pg_eng.set_source_id('initialising')
 		self.pg_eng.get_index_def()
 		self.pg_eng.drop_src_indices()
 		self.pg_eng.truncate_tables()
 		self.copy_table_data(copy_obfus=False)
 		self.pg_eng.create_src_indices()
 		self.sync_obfuscation(False)
+		self.pg_eng.set_source_id('initialised')
 		self.enable_replica()
 		self.email_alerts.send_end_sync_replica()
 	
