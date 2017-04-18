@@ -13,11 +13,10 @@ commands = [
 	'add_source', 
 	'drop_source', 
 	'list_config', 
+	'show_status' ,
 	'stop_replica', 
 	'disable_replica', 
-	'enable_replica', 
-	'show_status' , 
-	'detach_replica'
+	'enable_replica'
 	]
 command_help = 'Available commands, ' + ','.join(commands)
 
@@ -57,6 +56,8 @@ if args.command in commands:
 		replica.drop_source()
 	elif args.command == commands[10]:
 		replica.list_config()
+	elif args.command == commands[11]:
+		replica.show_status()
 		
 
 else:

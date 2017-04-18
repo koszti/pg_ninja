@@ -463,6 +463,7 @@ class replica_engine(object):
 		elif drop_src in  self.lst_yes:
 			print('Please type YES all uppercase to confirm')
 		sys.exit()
+		
 	def list_config(self):
 		"""
 			List the available configurations stored in config/
@@ -487,4 +488,21 @@ class replica_engine(object):
 				tab_row = [  '%s.%s' % (file_name, file_ext), source_name, source_status]
 				tab_body.append(tab_row)
 		print(tabulate(tab_body, headers=tab_headers))
-	
+	def show_status(self):
+		"""
+			list the replica status using the configuration files and the replica catalogue
+		"""
+		source_status=self.pg_eng.get_status()
+		tab_headers = ['Config file',  'Sch. clear', 'Sch. obfuscate',  'Status' ,  'Lag',  'Last received event']
+		tab_body = []
+			
+		for status in source_status:
+			source_name = status[0]
+			dest_schema = status[1]
+			source_status = status[2]
+			seconds_behind_master = status[3]
+			last_received_event = status[4]
+			obf_schema = status[5]
+			tab_row = [source_name, dest_schema, obf_schema, source_status, seconds_behind_master, last_received_event ]
+			tab_body.append(tab_row)
+		print(tabulate(tab_body, headers=tab_headers))
