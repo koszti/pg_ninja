@@ -1332,3 +1332,26 @@ class pg_engine:
 		for create_stat in idx_create:
 			self.pg_conn.pgsql_cur.execute(create_stat[0])
 	
+	def add_source(self, source_name, schema_clear, schema_obf):
+		sql_source = """
+					SELECT 
+						count(i_id_source)
+					FROM 
+						sch_chameleon.t_sources 
+					WHERE 
+						t_source=%s
+				;
+			"""
+		self.pg_conn.pgsql_cur.execute(sql_source, (source_name, ))
+		source_data = self.pg_conn.pgsql_cur.fetchone()
+		cnt_source = source_data[0]
+		if cnt_source == 0:
+			sql_add = """INSERT INTO sch_chameleon.t_sources 
+						( t_source,t_dest_schema,t_obf_schema) 
+					VALUES 
+						(%s,%s,%s); """
+			self.pg_conn.pgsql_cur.execute(sql_add, (source_name, schema_clear, schema_obf ))
+		else:
+			print("Source %s already registered." % source_name)
+		sys.exit()
+	

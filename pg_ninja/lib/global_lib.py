@@ -4,10 +4,11 @@ import sys
 import os
 import time
 import logging
+from logging.handlers  import TimedRotatingFileHandler
 from datetime import datetime
 
 
-class global_config:
+class global_config(object):
 	"""
 		This class parses the configuration file which is in config/config.yaml and sets 
 		the class variables used by the other libraries. 
@@ -19,11 +20,13 @@ class global_config:
 		:param command: the command specified on the ninja.py command line
 	
 	"""
-	def __init__(self,command):
+	def __init__(self,  config_name="default"):
 		"""
 			Class  constructor.
 		"""
-		config_file='config/config.yaml'
+		
+		config_dir='config'
+		config_file = '%s/%s.yaml' % (config_dir, config_name)
 		obfuscation_file='config/obfuscation.yaml'
 		self.snapshots_file='config/snapshots.yaml'
 		if not os.path.isfile(config_file):
@@ -55,13 +58,14 @@ class global_config:
 			self.log_level=confdic["log_level"]
 			self.log_dest=confdic["log_dest"]
 			self.copy_override=confdic["copy_override"]
-			self.log_file=confdic["log_dir"]+"/"+command+'.log'
+			self.log_file=confdic["log_dir"]+"/"+config_name+'.log'
 			self.pid_file=confdic["pid_dir"]+"/replica.pid"
 			self.log_dir=confdic["log_dir"]
 			self.email_config=confdic["email_config"]
-			self.log_append = confdic["log_append"]
+			self.log_days_keep = confdic["log_days_keep"]
 			self.skip_view = confdic["skip_view"]
 			self.out_dir = confdic["out_dir"]
+			self.source_name= confdic["source_name"]
 			if confdic["obfuscation_file"]:
 				obfuscation_file=confdic["obfuscation_file"]
 		except KeyError as missing_key:
@@ -99,7 +103,7 @@ class global_config:
 		
 
 		
-class replica_engine:
+class replica_engine(object):
 	"""
 		This class wraps the interface to the replica operations and bridges mysql and postgresql engines. 
 		The constructor inits the global configuration class  and setup the mysql and postgresql engines as class attributes. 
@@ -108,9 +112,9 @@ class replica_engine:
 		:param command: the command specified on the pg_ninja.py command line. This value is used to generate the log filename (see the class global_config).
 		
 	"""
-	def __init__(self, command):
+	def __init__(self, config, stdout=False):
 		
-		self.global_config=global_config(command)
+		self.global_config=global_config(config)
 		self.logger = logging.getLogger(__name__)
 		self.logger.setLevel(logging.DEBUG)
 		self.logger.propagate = False
@@ -120,11 +124,8 @@ class replica_engine:
 			fh=logging.StreamHandler(sys.stdout)
 			
 		elif self.global_config.log_dest=='file':
-			if self.global_config.log_append:
-				file_mode='a'
-			else:
-				file_mode='w'
-			fh = logging.FileHandler(self.global_config.log_file, file_mode)
+			fh = TimedRotatingFileHandler(self.global_config.log_file, when="d",interval=1,backupCount=self.global_config.log_days_keep)
+		
 		
 		if self.global_config.log_level=='debug':
 			fh.setLevel(logging.DEBUG)
@@ -412,3 +413,28 @@ class replica_engine:
 		self.sync_obfuscation(False)
 		self.enable_replica()
 		self.email_alerts.send_end_sync_replica()
+	
+	def add_source(self):
+		"""
+			register the configuration source in the replica catalogue
+		"""
+		source_name=self.global_config.source_name
+		schema_clear=self.global_config.schema_clear
+		schema_obf=self.global_config.schema_obf
+		self.pg_eng.add_source(source_name, schema_clear, schema_obf)
+
+	def drop_source(self):
+		"""
+			remove the configuration source and all the replica informations associated with the source from the replica catalogue
+		"""
+		source_name = self.global_config.source_name
+		drp_msg = 'Dropping the source %s will remove drop any replica reference.\n Are you sure? YES/No\n'  % source_name
+		if sys.version_info[0] == 3:
+			drop_src = input(drp_msg)
+		else:
+			drop_src = raw_input(drp_msg)
+		if drop_src == 'YES':
+			self.pg_eng.drop_source(self.global_config.source_name)
+		elif drop_src in  self.lst_yes:
+			print('Please type YES all uppercase to confirm')
+		sys.exit()

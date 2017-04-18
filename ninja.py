@@ -33,7 +33,7 @@ parser.add_argument('--snapshot', metavar='snapshot', type=str,  default='all', 
 args = parser.parse_args()
 
 if args.command in commands:
-	replica = replica_engine(args.command)
+	replica = replica_engine(args.config)
 	if args.command == commands[0]:
 		replica.create_service_schema()
 	elif args.command == commands[1]:

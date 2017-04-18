@@ -6,6 +6,7 @@ reply_batch_size: 1000
 copy_max_size: 10000
 my_database:  db_replica
 pg_database: db_replication
+source_name: 'default'
 
 # The schema clear stores the tables without obfuscation. 
 # The schema obfuscated stores the tables with the obfuscated  data defined in obfuscation.yaml
@@ -34,7 +35,7 @@ log_dir: 'logs/'
 out_dir: '/tmp/'
 log_level: 'debug'
 log_dest: 'stdout'
-log_append: True
+log_days_keep: 10
 #log_dest: 'file'
 #log_level: 'info'
 #log_level: 'debug'
