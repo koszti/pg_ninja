@@ -65,7 +65,9 @@ class global_config(object):
 			self.log_dest=confdic["log_dest"]
 			self.copy_override=confdic["copy_override"]
 			self.log_file=confdic["log_dir"]+"/"+config_name+'.log'
-			self.pid_file=confdic["pid_dir"]+"/replica.pid"
+			self.pid_file=confdic["pid_dir"]+"/"+config_name+".pid"
+			self.exit_file = confdic["pid_dir"]+"/"+config_name+".lock"
+			
 			self.log_dir=confdic["log_dir"]
 			self.email_config=confdic["email_config"]
 			self.log_days_keep = confdic["log_days_keep"]
@@ -166,7 +168,7 @@ class replica_engine(object):
 		self.my_eng=mysql_engine(self.global_config, self.logger)
 		self.pg_eng=pg_engine(self.global_config, self.my_eng.my_tables, self.logger)
 		self.pid_file=self.global_config.pid_file
-		self.exit_file="pid/exit_process.trg"
+		self.exit_file=self.global_config.exit_file
 		self.email_alerts=email_alerts(self.global_config.email_config, self.logger)
 		self.sleep_loop=self.global_config.sleep_loop
 	
@@ -382,7 +384,7 @@ class replica_engine(object):
 		with open(restart_log, "ab") as restart_file:
 			restart_file.write("%s - starting replica process \n" % (str_date))
 			restart_file.close()
-		self.email_alerts.send_start_replica_email()
+		#self.email_alerts.send_start_replica_email()
 		self.pg_eng.set_source_id('running')
 		while True:
 			self.my_eng.run_replica(self.pg_eng)

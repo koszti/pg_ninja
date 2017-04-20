@@ -544,7 +544,7 @@ class pg_engine:
 	def create_schema(self):
 		
 		if self.obf_schema:
-			sql_schema=" CREATE SCHEMA IF NOT EXISTS "+self.dest_schema+";"
+			sql_schema=" CREATE SCHEMA IF NOT EXISTS "+self.obf_schema+";"
 			self.pg_conn.pgsql_cur.execute(sql_schema)
 		sql_schema=" CREATE SCHEMA IF NOT EXISTS "+self.dest_schema+";"
 		sql_path=" SET search_path="+self.dest_schema+";"
@@ -996,7 +996,7 @@ class pg_engine:
 			insert_list.append(self.pg_conn.pgsql_cur.mogrify("%s,%s,%s,%s,%s,%s,%s,%s" ,  (
 																	global_data["batch_id"], 
 																	global_data["table"],  
-																	self.dest_schema, 
+																	global_data["schema"], 
 																	global_data["action"], 
 																	global_data["binlog"], 
 																	global_data["logpos"], 
