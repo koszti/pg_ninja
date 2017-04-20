@@ -278,6 +278,7 @@ class mysql_engine:
 											"log_table":log_table
 										}
 						event_data={}
+						event_update={}
 						event_data_obf={}
 						if isinstance(binlogevent, DeleteRowsEvent):
 							global_data["action"] = "delete"
@@ -285,6 +286,7 @@ class mysql_engine:
 						elif isinstance(binlogevent, UpdateRowsEvent):
 							global_data["action"] = "update"
 							event_values=row["after_values"]
+							event_update=row["before_values"]
 						elif isinstance(binlogevent, WriteRowsEvent):
 							global_data["action"] = "insert"
 							event_values=row["values"]
@@ -295,7 +297,12 @@ class mysql_engine:
 							column_type=column_data_type["data_type"]
 							if column_type in self.hexify and event_values[column_name]:
 								event_values[column_name]=binascii.hexlify(event_values[column_name])
-
+						for column_name in event_update:
+							column_type=column_map[column_name]
+							if column_type in self.hexify and event_update[column_name]:
+								event_update[column_name]=binascii.hexlify(event_update[column_name]).decode()
+							elif column_type in self.hexify and isinstance(event_update[column_name], bytes):
+								event_update[column_name] = ''
 
 						try:
 							obf_list=self.obfdic[table_name]
@@ -313,12 +320,12 @@ class mysql_engine:
 								self.logger.error("discarded row in obfuscation process.\n global_data:%s \n event_data:%s \n" % (global_data,event_values ))
 
 						event_data = dict(event_data.items() +event_values.items())
-						event_insert={"global_data":global_data,"event_data":event_data}
+						event_insert={"global_data":global_data,"event_data":event_data,  "event_update":event_update}
 						group_insert.append(event_insert)
 
 						if event_values_obf:
 							event_data_obf = dict(event_data_obf.items() +event_values_obf.items())
-							event_obf={"global_data":global_obf,"event_data":event_data_obf }
+							event_obf={"global_data":global_obf,"event_data":event_data_obf ,  "event_update":event_update}
 							group_insert.append(event_obf)
 
 

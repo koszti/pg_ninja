@@ -5,6 +5,9 @@ import json
 import datetime
 import decimal
 import time
+import base64
+import io
+
 class pg_encoder(json.JSONEncoder):
 		def default(self, obj):
 			if isinstance(obj, datetime.time) or isinstance(obj, datetime.datetime) or  isinstance(obj, datetime.date) or isinstance(obj, decimal.Decimal) or isinstance(obj, datetime.timedelta):
@@ -949,6 +952,7 @@ class pg_engine:
 							WHERE 
 											NOT b_processed
 								AND 	NOT b_replayed
+								AND		i_id_source=%s
 						)
 					UPDATE sch_chameleon.t_replica_batch
 						SET b_started=True
@@ -963,88 +967,104 @@ class pg_engine:
 						v_log_table
 					;
 					"""
-		self.pg_conn.pgsql_cur.execute(sql_batch)
-		batch_data=self.pg_conn.pgsql_cur.fetchall()
-		batch_id=batch_data[0][0]
-		self.logger.debug("cleaning the batch data for %s " % batch_id)
-		sql_clean="""DELETE FROM sch_chameleon.t_log_replica WHERE i_id_batch=%s ;  """
-		self.pg_conn.pgsql_cur.execute(sql_clean, (batch_id, ))
-
-		return  batch_data
+		self.pg_conn.pgsql_cur.execute(sql_batch, (self.i_id_source, ))
+		return self.pg_conn.pgsql_cur.fetchall()
+	
+	
+	def save_discarded_row(self,row_data,batch_id):
+		print(str(row_data))
+		b64_row=base64.b64encode(str(row_data))
+		sql_save="""INSERT INTO sch_chameleon.t_discarded_rows(
+											i_id_batch, 
+											t_row_data
+											)
+						VALUES (%s,%s);
+						"""
+		self.pg_conn.pgsql_cur.execute(sql_save,(batch_id,b64_row))
 	
 	def write_batch(self, group_insert):
+		csv_file=io.StringIO()
+		
 		insert_list=[]
 		for row_data in group_insert:
 			global_data=row_data["global_data"]
 			event_data=row_data["event_data"]
+			event_update=row_data["event_update"]
 			log_table=global_data["log_table"]
-			insert_list.append(self.pg_conn.pgsql_cur.mogrify("(%s,%s,%s,%s,%s,%s,%s)", (
-																									global_data["batch_id"], 
-																									global_data["table"],  
-																									global_data["schema"], 
-																									global_data["action"], 
-																									global_data["binlog"], 
-																									global_data["logpos"], 
-																									json.dumps(event_data, cls=pg_encoder)
-																								)
-																		)
-											)
-			
-		sql_insert="""
-								INSERT INTO sch_chameleon."""+log_table+"""
-								(
-									i_id_batch, 
-									v_table_name, 
-									v_schema_name, 
-									enm_binlog_event, 
-									t_binlog_name, 
-									i_binlog_position, 
-									jsb_event_data
-								)
-								VALUES
-									"""+ ','.join(insert_list ).decode()+"""
-								;
-						"""
+			insert_list.append(self.pg_conn.pgsql_cur.mogrify("%s,%s,%s,%s,%s,%s,%s,%s" ,  (
+																	global_data["batch_id"], 
+																	global_data["table"],  
+																	self.dest_schema, 
+																	global_data["action"], 
+																	global_data["binlog"], 
+																	global_data["logpos"], 
+																	json.dumps(event_data, cls=pg_encoder), 
+																	json.dumps(event_update, cls=pg_encoder)
+																)
+															)
+														)
+											
+		csv_data=b"\n".join(insert_list ).decode()
+		csv_file.write(csv_data)
+		csv_file.seek(0)
 		try:
-			self.pg_conn.pgsql_cur.execute(sql_insert)
-		except:
-			insert_list=[]
-			self.logger.error("error in batch %s fallback to single inserts" % (global_data["batch_id"], ))
 			
-			try:
-				for row_data in group_insert:
-					global_data=row_data["global_data"]
-					event_data=row_data["event_data"]
-					log_table=global_data["log_table"]
-					sql_insert="""
-								INSERT INTO sch_chameleon."""+log_table+"""
-								(
+			#self.pg_conn.pgsql_cur.execute(sql_insert)
+			sql_copy="""COPY "sch_chameleon"."""+log_table+""" (
 									i_id_batch, 
 									v_table_name, 
 									v_schema_name, 
 									enm_binlog_event, 
 									t_binlog_name, 
 									i_binlog_position, 
-									jsb_event_data
-								)
-								VALUES
-									(%s,%s,%s,%s,%s,%s,%s)
-								;
-						"""
-						
-					self.pg_conn.pgsql_cur.execute(sql_insert,  (
-																										global_data["batch_id"], 
-																										global_data["table"],  
-																										global_data["schema"], 
-																										global_data["action"], 
-																										global_data["binlog"], 
-																										global_data["logpos"], 
-																										json.dumps(event_data, cls=pg_encoder)
-																							)
-																		)
+									jsb_event_data,
+									jsb_event_update
+								) FROM STDIN WITH NULL 'NULL' CSV QUOTE '''' DELIMITER ',' ESCAPE '''' ; """
+			self.pg_conn.pgsql_cur.copy_expert(sql_copy,csv_file)
+		except psycopg2.Error as e:
+			self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
+			self.logger.error(csv_data)
+			self.logger.error("fallback to inserts")
+			self.insert_batch(group_insert)
+	
+	def insert_batch(self,group_insert):
+		self.logger.debug("starting insert loop")
+		for row_data in group_insert:
+			global_data=row_data["global_data"]
+			event_data=row_data["event_data"]
+			event_update=row_data["event_update"]
+			log_table=global_data["log_table"]
+			sql_insert="""
+				INSERT INTO sch_chameleon."""+log_table+"""
+				(
+					i_id_batch, 
+					v_table_name, 
+					v_schema_name, 
+					enm_binlog_event, 
+					t_binlog_name, 
+					i_binlog_position, 
+					jsb_event_data,
+					jsb_event_update
+				)
+				VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+				;						
+			"""
+			try:
+				self.pg_conn.pgsql_cur.execute(sql_insert,(
+					global_data["batch_id"], 
+					global_data["table"],  
+					global_data["schema"], 
+					global_data["action"], 
+					global_data["binlog"], 
+					global_data["logpos"], 
+					json.dumps(event_data, cls=pg_encoder), 
+					json.dumps(event_update, cls=pg_encoder))
+				)
 			except:
-				self.logger.error("discarded insert in replica:\n global_data:%s \n event_data:%s \n" % (global_data,event_data ))
-				
+				self.logger.error("error when storing event data. saving the discarded row")
+				self.save_discarded_row(row_data,global_data["batch_id"])
+	
+
 	def set_batch_processed(self, id_batch):
 		self.logger.debug("updating batch %s to processed" % (id_batch, ))
 		sql_update=""" UPDATE sch_chameleon.t_replica_batch
@@ -1059,13 +1079,22 @@ class pg_engine:
 		
 	def process_batch(self, replica_batch_size):
 		batch_loop=True
-		sql_process="""SELECT sch_chameleon.fn_process_batch(%s);"""
+		sql_process="""SELECT sch_chameleon.fn_process_batch(%s,%s);"""
 		while batch_loop:
-			self.pg_conn.pgsql_cur.execute(sql_process, (replica_batch_size, ))
+			self.pg_conn.pgsql_cur.execute(sql_process, (replica_batch_size, self.i_id_source))
 			batch_result=self.pg_conn.pgsql_cur.fetchone()
 			batch_loop=batch_result[0]
 			self.logger.debug("Batch loop value %s" % (batch_loop))
-			#self.logger.debug("Batch loop value %s" % (batch_loop))		
+		self.logger.debug("Cleaning replayed batches older than %s" % (self.batch_retention))
+		sql_cleanup="""DELETE FROM 
+									sch_chameleon.t_replica_batch
+								WHERE
+										b_started
+									AND b_processed
+									AND b_replayed
+									AND now()-ts_replayed>%s::interval
+									 """
+		self.pg_conn.pgsql_cur.execute(sql_cleanup, (self.batch_retention, ))
 
 
 	def build_alter_table(self, token):

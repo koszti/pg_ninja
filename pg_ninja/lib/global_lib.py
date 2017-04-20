@@ -71,6 +71,7 @@ class global_config(object):
 			self.log_days_keep = confdic["log_days_keep"]
 			self.skip_view = confdic["skip_view"]
 			self.out_dir = confdic["out_dir"]
+			self.sleep_loop = confdic["sleep_loop"]
 			self.source_name= confdic["source_name"]
 			if confdic["obfuscation_file"]:
 				obfuscation_file=confdic["obfuscation_file"]
@@ -166,6 +167,7 @@ class replica_engine(object):
 		self.pid_file=self.global_config.pid_file
 		self.exit_file="pid/exit_process.trg"
 		self.email_alerts=email_alerts(self.global_config.email_config, self.logger)
+		self.sleep_loop=self.global_config.sleep_loop
 	
 	
 	def sync_snapshot(self, snap_item, mysql_conn):
@@ -380,12 +382,14 @@ class replica_engine(object):
 			restart_file.write("%s - starting replica process \n" % (str_date))
 			restart_file.close()
 		self.email_alerts.send_start_replica_email()
+		self.pg_eng.set_source_id('running')
 		while True:
 			self.my_eng.run_replica(self.pg_eng)
-			self.logger.debug("batch complete. sleeping 1 second")
-			time.sleep(1)
+			self.logger.info("batch complete. sleeping %s second(s)" % (self.sleep_loop, ))
+			time.sleep(self.sleep_loop)
 			if self.check_request_exit():
-				sys.exit()
+				break
+		self.pg_eng.set_source_id('stopped')
 			
 		
 	def copy_table_data(self, copy_obfus=True):

@@ -7,10 +7,11 @@ copy_max_size: 10000
 my_database:  db_replica
 pg_database: db_replication
 source_name: 'default'
+sleep_loop: 5
 
 # The schema clear stores the tables without obfuscation. 
-# The schema obfuscated stores the tables with the obfuscated  data defined in obfuscation.yaml
 schema_clear: sch_clear
+# The schema obfuscated stores the tables with the obfuscated  data defined in the obfuscation the obfuscation file. check obfuscation-example.yaml for the details
 schema_obf: sch_obf
 
 # The obfuscation file, if empty defaults to config/obfuscation.yaml
