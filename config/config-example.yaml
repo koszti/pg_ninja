@@ -8,6 +8,7 @@ my_database:  db_replica
 pg_database: db_replication
 source_name: 'default'
 sleep_loop: 5
+batch_retention: '7 days'
 
 # The schema clear stores the tables without obfuscation. 
 schema_clear: sch_clear

@@ -31,6 +31,7 @@ class pg_connection:
 		self.pg_cursor=None
 		self.pg_charset=self.global_conf.pg_charset
 		
+		
 	
 	def connect_db(self, destination_schema=None):
 		pg_pars=dict(self.pg_conn.items()+ {'dbname':self.pg_database}.items())
@@ -95,6 +96,7 @@ class pg_engine:
 		self.idx_ddl={}
 		self.type_ddl={}
 		self.pg_charset=self.pg_conn.pg_charset
+		self.batch_retention = global_config.batch_retention
 		self.cat_version='0.9'
 		self.cat_sql=[
 			{'version':'base','script': 'create_schema.sql'}, 

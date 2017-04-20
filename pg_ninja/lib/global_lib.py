@@ -73,6 +73,7 @@ class global_config(object):
 			self.out_dir = confdic["out_dir"]
 			self.sleep_loop = confdic["sleep_loop"]
 			self.source_name= confdic["source_name"]
+			self.batch_retention = confdic["batch_retention"]
 			if confdic["obfuscation_file"]:
 				obfuscation_file=confdic["obfuscation_file"]
 		except KeyError as missing_key:
