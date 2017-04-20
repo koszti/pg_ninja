@@ -40,6 +40,7 @@ class global_config(object):
 		conffile=open(config_file, 'rb')
 		confdic=yaml.load(conffile.read())
 		conffile.close()
+		self.lst_yes= ['yes',  'Yes', 'y', 'Y']
 		
 		
 		

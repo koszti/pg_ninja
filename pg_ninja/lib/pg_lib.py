@@ -48,6 +48,7 @@ class pg_connection:
 
 class pg_engine:
 	def __init__(self, global_config, table_metadata,  logger, sql_dir='sql/'):
+		self.lst_yes = global_config.lst_yes
 		self.logger=logger
 		self.sql_dir=sql_dir
 		self.idx_sequence=0
@@ -107,7 +108,14 @@ class pg_engine:
 		sql_unobf = """ DROP %s IF EXISTS "%s"."%s" CASCADE; """ % (type, self.pg_conn.schema_obf, relname)
 		self.pg_conn.pgsql_cur.execute(sql_unobf)	
 	
+	def clear_obfuscation_reindex(self):
+		self.logger.info("clearing existing idx definition for schema %s"  % (self.pg_conn.schema_obf))
+		sql_del="""DELETE FROM sch_chameleon.t_rebuild_idx;"""
+		self.pg_conn.pgsql_cur.execute(sql_del)	
+	
 	def sync_obfuscation(self, obfdic):
+		
+		
 		sql_get_clear="""
 									SELECT 
 										table_schema,
@@ -148,9 +156,6 @@ class pg_engine:
 		for obf_table in  obfdic:
 			obf_list.append(obf_table)
 		
-		self.logger.info("clearing existing idx definition for schema %s"  % (self.pg_conn.schema_obf))
-		sql_del="""DELETE FROM sch_chameleon.t_rebuild_idx;"""
-		self.pg_conn.pgsql_cur.execute(sql_del)	
 		self.logger.info("saving index and key definitions for tables in schema %s"  % (self.pg_conn.schema_obf))
 		
 		sql_idx_def="""
@@ -293,16 +298,17 @@ class pg_engine:
 		
 		self.create_views(obfdic)
 		
+		
 	def sync_obf_table(self, tab, obfdata):
 		self.logger.info("dropping indices and pkey on table %s in schema %s " % (tab, self.pg_conn.schema_obf))	
 		sql_get_drop="""SELECT 
-									t_drop
-								FROM 
-									sch_chameleon.t_rebuild_idx  
-								WHERE
-									v_table_name=%s
-									AND v_schema_name=%s
-								; """
+						t_drop
+					FROM 
+						sch_chameleon.t_rebuild_idx  
+					WHERE
+						v_table_name=%s
+						AND v_schema_name=%s
+					; """
 		self.pg_conn.pgsql_cur.execute(sql_get_drop, (tab, self.pg_conn.schema_obf))	
 		drop_idx=self.pg_conn.pgsql_cur.fetchall()
 		for drop_stat in drop_idx:
@@ -312,17 +318,22 @@ class pg_engine:
 		self.copy_obf_data(tab, obfdata)
 		self.logger.info("creating indices and pkey on table %s in schema %s " % (tab, self.pg_conn.schema_obf))	
 		sql_get_create="""SELECT 
-									t_create
-								FROM 
-									sch_chameleon.t_rebuild_idx  
-								WHERE
-									v_table_name=%s
-									AND v_schema_name=%s
-								; """
+						t_create
+					FROM 
+						sch_chameleon.t_rebuild_idx  
+					WHERE
+						v_table_name=%s
+						AND v_schema_name=%s
+					; """
 		self.pg_conn.pgsql_cur.execute(sql_get_create, (tab, self.pg_conn.schema_obf))	
 		create_idx=self.pg_conn.pgsql_cur.fetchall()
 		for create_stat in create_idx:
-			self.pg_conn.pgsql_cur.execute(create_stat [0])
+			try:
+				self.pg_conn.pgsql_cur.execute(create_stat [0])
+			except psycopg2.Error as e:
+				self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
+				self.logger.error(create_stat [0])
+		
 		
 	def create_obf_child(self, table):
 		sql_check="""SELECT 
@@ -1253,13 +1264,24 @@ class pg_engine:
 					self.pg_conn.pgsql_cur.execute(st_vacuum)
 
 	def get_index_def(self, table_limit=None):
+		drp_msg = 'Do you want to clean the existing index definitions in t_index_def?.\n YES/No\n' 
+		if sys.version_info[0] == 3:
+			drop_idx = input(drp_msg)
+		else:
+			drop_idx = raw_input(drp_msg)
+		if drop_idx == 'YES':
+			sql_delete = """ DELETE FROM sch_chameleon.t_index_def;"""
+			self.pg_conn.pgsql_cur.execute(sql_delete)
+		elif drop_idx in self.lst_yes or len(drop_idx) == 0:
+			print('Please type YES all uppercase to confirm')
+			sys.exit()
 		self.logger.info("collecting indices and pk for schema %s" % (self.pg_conn.dest_schema,))
 		table_filter = ""
 		if table_limit:
 			table_filter=self.pg_conn.pgsql_cur.mogrify("WHERE table_name IN  (SELECT unnest(%s)) ", (table_limit, ))
 		
 		sql_get_idx=""" 
-				DELETE FROM sch_chameleon.t_index_def;
+				
 				INSERT INTO sch_chameleon.t_index_def
 					(
 						v_schema,
@@ -1334,7 +1356,7 @@ class pg_engine:
 				WHERE
 					sch.nspname=%s
 				) idx
-		""" + table_filter
+		""" + table_filter +""" ON CONFLICT DO NOTHING"""
 		self.pg_conn.pgsql_cur.execute(sql_get_idx, (self.pg_conn.dest_schema, ))
 		
 	
