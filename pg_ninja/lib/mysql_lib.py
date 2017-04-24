@@ -689,7 +689,14 @@ class mysql_engine:
 		out_file='%s/output_copy.csv' % self.out_dir
 		self.logger.info("locking the tables")
 		self.lock_tables()
-		for table_name in self.my_tables:
+		table_list = []
+		if pg_engine.table_limit[0] == '*':
+			for table_name in self.my_tables:
+				table_list.append(table_name)
+		else:
+			table_list = pg_engine.table_limit
+			
+		for table_name in table_list:
 			slice_insert=[]
 			try:
 				copy_limit=self.copy_override[table_name]
