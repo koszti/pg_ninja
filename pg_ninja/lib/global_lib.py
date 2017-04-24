@@ -265,7 +265,7 @@ class replica_engine(object):
 			self.logger.info("Replica already enabled")
 	
 		
-	def sync_obfuscation(self, send_email=True):
+	def sync_obfuscation(self, send_email=True, tables_only=None):
 		"""
 			the function sync the obfuscated tables using the obfuscation file indicated in the configuration.
 			The replica is stopped and disabled before starting the obfuscation sync.
@@ -274,7 +274,9 @@ class replica_engine(object):
 			:param send_email=True: if true an email is sent when the process is complete.
 		"""
 		self.stop_replica(allow_restart=False)
-		self.pg_eng.sync_obfuscation(self.global_config.obfdic)
+		self.pg_eng.set_source_id('initialising')
+		self.pg_eng.sync_obfuscation(self.global_config.obfdic, tables_only)
+		self.pg_eng.set_source_id('initialised')
 		self.logger.info("Sync complete, replica can be restarted")
 		if send_email:
 			self.enable_replica()
@@ -428,7 +430,7 @@ class replica_engine(object):
 		
 		
 	
-	def sync_replica(self):
+	def sync_replica(self, table):
 		"""
 			This method is similar to the init_replica with some notable exceptions.
 			The tables on postgresql are not dropped. 
@@ -440,6 +442,7 @@ class replica_engine(object):
 		"""
 		self.stop_replica(allow_restart=False)
 		self.pg_eng.set_source_id('initialising')
+		self.pg_eng.table_limit=table.split(',')
 		self.pg_eng.get_index_def()
 		self.pg_eng.drop_src_indices()
 		self.pg_eng.truncate_tables()

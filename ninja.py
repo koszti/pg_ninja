@@ -47,9 +47,9 @@ if args.command in commands:
 	elif args.command == commands[5]:
 		replica.take_snapshot(args.snapshot)
 	elif args.command == commands[6]:
-		replica.sync_obfuscation()
+		replica.sync_obfuscation(False, args.table)
 	elif args.command == commands[7]:
-		replica.sync_replica()
+		replica.sync_replica(args.table)
 	elif args.command == commands[8]:
 		replica.add_source()
 	elif args.command == commands[9]:

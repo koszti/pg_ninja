@@ -107,6 +107,7 @@ class pg_engine:
 		num_schema=(self.check_service_schema())[0]
 		if cat_version!=self.cat_version and int(num_schema)>0:
 			self.upgrade_service_schema()
+		self.table_limit = ['*']
 	
 	
 	def drop_obf_rel(self, relname, type):
@@ -118,44 +119,44 @@ class pg_engine:
 		sql_del="""DELETE FROM sch_chameleon.t_rebuild_idx;"""
 		self.pg_conn.pgsql_cur.execute(sql_del)	
 	
-	def sync_obfuscation(self, obfdic):
+	def sync_obfuscation(self, obfdic, tables_only):
 		
 		
 		sql_get_clear="""
-									SELECT 
-										table_schema,
-										table_name 
-										
-									FROM  
-										information_schema.tables 
-									WHERE 
-											table_name NOT IN  (
-																	SELECT 
-																		unnest(%s)
-																) 
-										AND table_schema=%s
-										AND table_type='BASE TABLE'
-									;
-		
+			SELECT 
+				table_schema,
+				table_name 
+				
+			FROM  
+				information_schema.tables 
+			WHERE 
+					table_name NOT IN  
+						(
+							SELECT 
+								unnest(%s)
+						) 
+				AND table_schema=%s
+				AND table_type='BASE TABLE'
+			;
 		"""
 		sql_get_obf="""
-									SELECT 
-										table_name 
-									FROM
-										information_schema.tables
-									WHERE
-										table_name IN  (SELECT  unnest(%s)) 
-										AND table_schema=%s
-										AND table_type='BASE TABLE'
-								EXCEPT
-								SELECT 
-									table_name FROM
-								information_schema.tables
-								WHERE
-										table_name IN  (SELECT unnest(%s)) 
-									AND table_schema=%s
-									AND table_type='BASE TABLE'
-									;
+				SELECT 
+					table_name 
+				FROM
+					information_schema.tables
+				WHERE
+					table_name IN  (SELECT  unnest(%s)) 
+					AND table_schema=%s
+					AND table_type='BASE TABLE'
+			EXCEPT
+				SELECT 
+					table_name FROM
+				information_schema.tables
+				WHERE
+						table_name IN  (SELECT unnest(%s)) 
+					AND table_schema=%s
+					AND table_type='BASE TABLE'
+		;
 		"""
 		obf_list = []
 		for obf_table in  obfdic:
@@ -1265,36 +1266,47 @@ class pg_engine:
 			return False
 	
 	def truncate_tables(self):
-			sql_clean=""" 
-							SELECT DISTINCT
-								format('SET lock_timeout=''10s'';TRUNCATE TABLE %I.%I;',v_schema,v_table) v_truncate,
-								format('DELETE FROM %I.%I;',v_schema,v_table) v_delete,
-								format('VACUUM %I.%I;',v_schema,v_table) v_vacuum,
-								format('%I.%I',v_schema,v_table) as v_tab,
-								v_table
-							FROM
-								sch_chameleon.t_index_def 
-							ORDER BY 
-								v_table
-			"""
-			self.pg_conn.pgsql_cur.execute(sql_clean)
-			tab_clean=self.pg_conn.pgsql_cur.fetchall()
-			for stat_clean in tab_clean:
-				st_truncate=stat_clean[0]
-				st_delete=stat_clean[1]
-				st_vacuum=stat_clean[2]
-				tab_name=stat_clean[3]
-				try:
-					self.logger.info("truncating table %s" % (tab_name,))
-					self.pg_conn.pgsql_cur.execute(st_truncate)
-					
-				except:
-					self.logger.info("truncate failed, fallback to delete on table %s" % (tab_name,))
-					self.pg_conn.pgsql_cur.execute(st_delete)
-					self.logger.info("running vacuum on table %s" % (tab_name,))
-					self.pg_conn.pgsql_cur.execute(st_vacuum)
+		table_limit = ''
+		if self.table_limit[0] != '*':
+			table_limit = self.pg_conn.pgsql_cur.mogrify("""WHERE v_table IN  (SELECT unnest(%s))""",(self.table_limit, )).decode()
+		
+		
+		sql_clean=""" 
+						SELECT DISTINCT
+							format('SET lock_timeout=''10s'';TRUNCATE TABLE %%I.%%I;',v_schema,v_table) v_truncate,
+							format('DELETE FROM %%I.%%I;',v_schema,v_table) v_delete,
+							format('VACUUM %%I.%%I;',v_schema,v_table) v_vacuum,
+							format('%%I.%%I',v_schema,v_table) as v_tab,
+							v_table
+						FROM
+							sch_chameleon.t_index_def 
+						%s
+						
+						ORDER BY 
+							v_table
+		""" % (table_limit, )
+		self.pg_conn.pgsql_cur.execute(sql_clean)
+		tab_clean=self.pg_conn.pgsql_cur.fetchall()
+		for stat_clean in tab_clean:
+			st_truncate=stat_clean[0]
+			st_delete=stat_clean[1]
+			st_vacuum=stat_clean[2]
+			tab_name=stat_clean[3]
+			try:
+				self.logger.info("truncating table %s" % (tab_name,))
+				self.pg_conn.pgsql_cur.execute(st_truncate)
+				
+			except:
+				self.logger.info("truncate failed, fallback to delete on table %s" % (tab_name,))
+				self.pg_conn.pgsql_cur.execute(st_delete)
+				self.logger.info("running vacuum on table %s" % (tab_name,))
+				self.pg_conn.pgsql_cur.execute(st_vacuum)
 
-	def get_index_def(self, table_limit=None):
+	def get_index_def(self):
+		table_limit = ''
+		if self.table_limit[0] != '*':
+			table_limit = self.pg_conn.pgsql_cur.mogrify("""WHERE table_name IN  (SELECT unnest(%s))""",(self.table_limit, )).decode()
+		
 		drp_msg = 'Do you want to clean the existing index definitions in t_index_def?.\n YES/No\n' 
 		if sys.version_info[0] == 3:
 			drop_idx = input(drp_msg)
@@ -1307,9 +1319,6 @@ class pg_engine:
 			print('Please type YES all uppercase to confirm')
 			sys.exit()
 		self.logger.info("collecting indices and pk for schema %s" % (self.pg_conn.dest_schema,))
-		table_filter = ""
-		if table_limit:
-			table_filter=self.pg_conn.pgsql_cur.mogrify("WHERE table_name IN  (SELECT unnest(%s)) ", (table_limit, ))
 		
 		sql_get_idx=""" 
 				
@@ -1387,19 +1396,27 @@ class pg_engine:
 				WHERE
 					sch.nspname=%s
 				) idx
-		""" + table_filter +""" ON CONFLICT DO NOTHING"""
+		""" + table_limit +""" ON CONFLICT DO NOTHING"""
 		self.pg_conn.pgsql_cur.execute(sql_get_idx, (self.pg_conn.dest_schema, ))
 		
 	
 	def drop_src_indices(self):
-		sql_idx="""SELECT t_drop FROM  sch_chameleon.t_index_def;"""
+		table_limit = ''
+		if self.table_limit[0] != '*':
+			table_limit = self.pg_conn.pgsql_cur.mogrify("""WHERE v_table IN  (SELECT unnest(%s))""",(self.table_limit, )).decode()
+		
+		sql_idx="""SELECT t_drop FROM  sch_chameleon.t_index_def %s; """ % (table_limit, )
 		self.pg_conn.pgsql_cur.execute(sql_idx)
 		idx_drop=self.pg_conn.pgsql_cur.fetchall()
 		for drop_stat in idx_drop:
 			self.pg_conn.pgsql_cur.execute(drop_stat[0])
 			
 	def create_src_indices(self):
-		sql_idx="""SELECT t_create FROM  sch_chameleon.t_index_def"""
+		table_limit = ''
+		if self.table_limit[0] != '*':
+			table_limit = self.pg_conn.pgsql_cur.mogrify("""WHERE v_table IN  (SELECT unnest(%s))""",(self.table_limit, )).decode()
+		
+		sql_idx="""SELECT t_create FROM  sch_chameleon.t_index_def %s;""" % (table_limit, )
 		self.pg_conn.pgsql_cur.execute(sql_idx)
 		idx_create=self.pg_conn.pgsql_cur.fetchall()
 		for create_stat in idx_create:
