@@ -119,7 +119,26 @@ class pg_engine:
 		sql_del="""DELETE FROM sch_chameleon.t_rebuild_idx;"""
 		self.pg_conn.pgsql_cur.execute(sql_del)	
 	
-	def sync_obfuscation(self, obfdic, tables_only):
+	def sync_obfuscation(self, obfdic, clean_idx=False):
+		
+		
+		if clean_idx:
+			self.clear_obfuscation_reindex()
+		else:
+			drp_msg = 'Do you want to clean the existing index definitions in t_rebuild_idx?.\n YES/No\n' 
+			if sys.version_info[0] == 3:
+				drop_idx = input(drp_msg)
+			else:
+				drop_idx = raw_input(drp_msg)
+		if drop_idx == 'YES':
+			self.clear_obfuscation_reindex()
+		elif drop_idx in self.lst_yes or len(drop_idx) == 0:
+			print('Please type YES all uppercase to confirm')
+			sys.exit()
+		table_limit = ''
+		if self.table_limit[0] != '*':
+			table_limit = self.pg_conn.pgsql_cur.mogrify(""" AND table_name IN  (SELECT unnest(%s))""",(self.table_limit, )).decode()
+			table_limit_pk = self.pg_conn.pgsql_cur.mogrify(""" AND tab.relname IN  (SELECT unnest(%s))""",(self.table_limit, )).decode()
 		
 		
 		sql_get_clear="""
@@ -137,6 +156,7 @@ class pg_engine:
 						) 
 				AND table_schema=%s
 				AND table_type='BASE TABLE'
+				""" + table_limit + """
 			;
 		"""
 		sql_get_obf="""
@@ -148,6 +168,7 @@ class pg_engine:
 					table_name IN  (SELECT  unnest(%s)) 
 					AND table_schema=%s
 					AND table_type='BASE TABLE'
+					""" + table_limit + """
 			EXCEPT
 				SELECT 
 					table_name FROM
@@ -156,6 +177,7 @@ class pg_engine:
 						table_name IN  (SELECT unnest(%s)) 
 					AND table_schema=%s
 					AND table_type='BASE TABLE'
+					""" + table_limit + """
 		;
 		"""
 		obf_list = []
@@ -201,6 +223,7 @@ class pg_engine:
 									table_name IN  (SELECT unnest(%s)) 
 									AND table_schema=%s
 								AND table_type='BASE TABLE'
+								""" + table_limit + """
 						) tab
 					ON 
 						tab.tabid=idx.indrelid
@@ -255,6 +278,7 @@ class pg_engine:
 									con.contype='p'
 								AND tab.relname IN  (SELECT unnest(%s)) 
 								AND sch.nspname=%s
+								""" + table_limit_pk + """
 								
 							ON CONFLICT DO NOTHING
 							;
@@ -300,7 +324,8 @@ class pg_engine:
 			tab_pk=self.pg_conn.pgsql_cur.fetchone()
 			self.pg_conn.pgsql_cur.execute(tab_pk[0])
 		for tab in obfdic:
-			self.sync_obf_table(tab, obfdic[tab])
+			if self.table_limit == '*' or tab in self.table_limit:
+				self.sync_obf_table(tab, obfdic[tab])
 		
 		self.create_views(obfdic)
 		
