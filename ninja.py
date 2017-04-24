@@ -58,6 +58,12 @@ if args.command in commands:
 		replica.list_config()
 	elif args.command == commands[11]:
 		replica.show_status()
+	elif args.command == commands[12]:
+		replica.stop_replica()
+	elif args.command == commands[13]:
+		replica.stop_replica(allow_restart=False)
+	elif args.command == commands[14]:
+		replica.enable_replica()
 		
 
 else:
