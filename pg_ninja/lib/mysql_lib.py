@@ -215,6 +215,7 @@ class mysql_engine:
 		self.logger.debug("START STREAMING - log_file %s, log_position %s. id_batch: %s " % (log_file, log_position, id_batch))
 		for binlogevent in my_stream:
 			total_events+=1
+			event_time=binlogevent.timestamp
 			if isinstance(binlogevent, RotateEvent):
 				binlogfile=binlogevent.next_binlog
 				position=binlogevent.position
@@ -223,6 +224,7 @@ class mysql_engine:
 					if log_file!=binlogfile:
 						master_data["File"]=binlogfile
 						master_data["Position"]=position
+						master_data["Time"]=event_time
 					if len(group_insert)>0:
 						pg_engine.write_batch(group_insert)
 						group_insert=[]
@@ -241,8 +243,9 @@ class mysql_engine:
 						if len(token)>0:
 							master_data["File"]=binlogfile
 							master_data["Position"]=binlogevent.packet.log_pos
+							master_data["Time"]=event_time
 							self.logger.debug("CAPTURED QUERY- binlogfile %s, position %s. Lenght group insert: %s \n Query: %s " % (binlogfile, binlogevent.packet.log_pos, grp_length, binlogevent.query))
-							print token
+							self.logger.debug("""TOKEN: %s """ % (token, ))
 							query_data={
 										"binlog":log_file, 
 										"logpos":log_position, 
@@ -331,6 +334,7 @@ class mysql_engine:
 
 						master_data["File"]=log_file
 						master_data["Position"]=log_position
+						master_data["Time"]=event_time
 					if total_events>=self.replica_batch_size:
 						self.logger.debug("total events exceeded. Master data: %s  " % (master_data,  ))
 						total_events=0
