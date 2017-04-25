@@ -119,8 +119,68 @@ class pg_engine:
 		sql_del="""DELETE FROM sch_chameleon.t_rebuild_idx;"""
 		self.pg_conn.pgsql_cur.execute(sql_del)	
 	
-	def sync_obfuscation(self, obfdic, clean_idx=False):
+	def drop_null_obf(self):
+		self.logger.info("dropping null constraints in schema %s"  % (self.pg_conn.schema_obf))
+		sql_gen_drop="""
+			WITH t_key as(
+				SELECT
+					sch.nspname schema_name,
+					tab.relname table_name,
+					att.attname column_name
+				FROM
+					pg_constraint con
+					INNER JOIN pg_namespace sch
+						ON sch.oid=connamespace
+					INNER JOIN pg_attribute att
+						ON
+							att.attrelid=con.conrelid
+						AND	att.attnum = any(con.conkey)
+					INNER JOIN pg_class tab
+						ON
+							att.attrelid=tab.oid
+				WHERE
+					con.contype='p'
+					and sch.nspname=%s
+				)
+				SELECT
+					format(
+							'ALTER TABLE %%I.%%I ALTER COLUMN %%I DROP NOT NULL;',
+							table_schema,
+							table_name,
+							column_name
+						) as drop_null
+				FROM
+					information_schema.columns col
+				WHERE
+						(
+							table_schema,
+							table_name,
+							column_name
+						) NOT IN
+							(
+								SELECT 
+									schema_name,
+									table_name,
+									column_name 
+								FROM 
+									t_key
+							)
+					AND	table_schema=%s
+					AND	Is_nullable='NO'
+				;
+
+		"""
+		self.pg_conn.pgsql_cur.execute(sql_gen_drop, (self.obf_schema, self.obf_schema ))	
+		null_cols=self.pg_conn.pgsql_cur.fetchall()
+		for null_col in null_cols:
+			try:
+				self.pg_conn.pgsql_cur.execute(null_col [0])
+			except psycopg2.Error as e:
+				self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
+				self.logger.error(null_col [0])
 		
+		
+	def sync_obfuscation(self, obfdic, clean_idx=False):
 		
 		if clean_idx:
 			self.clear_obfuscation_reindex()
@@ -135,6 +195,7 @@ class pg_engine:
 		elif drop_idx in self.lst_yes or len(drop_idx) == 0:
 			print('Please type YES all uppercase to confirm')
 			sys.exit()
+		self.drop_null_obf()
 		table_limit = ''
 		if self.table_limit[0] != '*':
 			table_limit = self.pg_conn.pgsql_cur.mogrify(""" AND table_name IN  (SELECT unnest(%s))""",(self.table_limit, )).decode()
@@ -184,7 +245,7 @@ class pg_engine:
 		for obf_table in  obfdic:
 			obf_list.append(obf_table)
 		
-		self.logger.info("saving index and key definitions for tables in schema %s"  % (self.pg_conn.schema_obf))
+		self.logger.info("saving index and key definitions for tables in schema %s"  % (self.obf_schema))
 		
 		sql_idx_def="""
 			
@@ -236,7 +297,7 @@ class pg_engine:
 
 				;
 		"""
-		self.pg_conn.pgsql_cur.execute(sql_idx_def, (obf_list, self.pg_conn.schema_obf))	
+		self.pg_conn.pgsql_cur.execute(sql_idx_def, (obf_list, self.obf_schema))	
 		sql_pkeys = """
 							INSERT INTO sch_chameleon.t_rebuild_idx
 							(
@@ -283,20 +344,20 @@ class pg_engine:
 							ON CONFLICT DO NOTHING
 							;
 					"""
-		self.pg_conn.pgsql_cur.execute(sql_pkeys, (obf_list, self.pg_conn.schema_obf))	
+		self.pg_conn.pgsql_cur.execute(sql_pkeys, (obf_list, self.obf_schema))	
 		
 		self.logger.info("finding tables no longer obfuscated...")
-		self.pg_conn.pgsql_cur.execute(sql_get_clear, (obf_list, self.pg_conn.schema_obf))	
+		self.pg_conn.pgsql_cur.execute(sql_get_clear, (obf_list, self.obf_schema))	
 		tab_clear=self.pg_conn.pgsql_cur.fetchall()
 		self.logger.info("finding tables requiring obfuscation...")
-		self.pg_conn.pgsql_cur.execute(sql_get_obf, (obf_list, self.pg_conn.dest_schema, obf_list, self.pg_conn.schema_obf))	
+		self.pg_conn.pgsql_cur.execute(sql_get_obf, (obf_list, self.dest_schema, obf_list, self.obf_schema))	
 		tab_obf=self.pg_conn.pgsql_cur.fetchall()
 		for tab in tab_clear:
 			self.logger.info("dropping table %s from the schema %s " % (tab[1], tab[0]))
 			self.drop_obf_rel(tab[1], "TABLE")
 		
 		for tab in tab_obf:
-			self.logger.info("creating table %s in schema %s " % (tab[0], self.pg_conn.schema_obf))
+			self.logger.info("creating table %s in schema %s " % (tab[0], self.obf_schema))
 			self.drop_obf_rel(tab[0], "VIEW")
 			self.create_obf_child(tab[0])
 			self.sync_obf_table(tab[0], obfdic[tab[0]])
@@ -320,7 +381,7 @@ class pg_engine:
 								AND pk.contype='p'
 								AND tab.relname=%s
 							; """
-			self.pg_conn.pgsql_cur.execute(sql_pk, (self.pg_conn.schema_obf, self.pg_conn.dest_schema, tab[0]))	
+			self.pg_conn.pgsql_cur.execute(sql_pk, (self.obf_schema, self.dest_schema, tab[0]))	
 			tab_pk=self.pg_conn.pgsql_cur.fetchone()
 			self.pg_conn.pgsql_cur.execute(tab_pk[0])
 		for tab in obfdic:
@@ -331,7 +392,7 @@ class pg_engine:
 		
 		
 	def sync_obf_table(self, tab, obfdata):
-		self.logger.info("dropping indices and pkey on table %s in schema %s " % (tab, self.pg_conn.schema_obf))	
+		self.logger.info("dropping indices and pkey on table %s in schema %s " % (tab, self.obf_schema))	
 		sql_get_drop="""SELECT 
 						t_drop
 					FROM 
@@ -340,14 +401,14 @@ class pg_engine:
 						v_table_name=%s
 						AND v_schema_name=%s
 					; """
-		self.pg_conn.pgsql_cur.execute(sql_get_drop, (tab, self.pg_conn.schema_obf))	
+		self.pg_conn.pgsql_cur.execute(sql_get_drop, (tab, self.obf_schema))	
 		drop_idx=self.pg_conn.pgsql_cur.fetchall()
 		for drop_stat in drop_idx:
 			self.pg_conn.pgsql_cur.execute(drop_stat[0])
 		
-		self.logger.info("syncronising data for table %s in schema %s " % (tab, self.pg_conn.schema_obf))	
+		self.logger.info("syncronising data for table %s in schema %s " % (tab, self.obf_schema))	
 		self.copy_obf_data(tab, obfdata)
-		self.logger.info("creating indices and pkey on table %s in schema %s " % (tab, self.pg_conn.schema_obf))	
+		self.logger.info("creating indices and pkey on table %s in schema %s " % (tab, self.obf_schema))	
 		sql_get_create="""SELECT 
 						t_create
 					FROM 
@@ -356,7 +417,7 @@ class pg_engine:
 						v_table_name=%s
 						AND v_schema_name=%s
 					; """
-		self.pg_conn.pgsql_cur.execute(sql_get_create, (tab, self.pg_conn.schema_obf))	
+		self.pg_conn.pgsql_cur.execute(sql_get_create, (tab, self.obf_schema))	
 		create_idx=self.pg_conn.pgsql_cur.fetchall()
 		for create_stat in create_idx:
 			try:
@@ -375,13 +436,13 @@ class pg_engine:
 													table_schema=%s 
 										AND 	table_name=%s;
 						"""
-		self.pg_conn.pgsql_cur.execute(sql_check, (self.pg_conn.dest_schema, table))	
+		self.pg_conn.pgsql_cur.execute(sql_check, (self.dest_schema, table))	
 		tab_count=self.pg_conn.pgsql_cur.fetchone()
 		if tab_count[0]>0:
 			sql_child="""
-				DROP TABLE  IF EXISTS \"""" + self.pg_conn.schema_obf + """\".\"""" + table + """\" ; 
-				CREATE TABLE \"""" + self.pg_conn.schema_obf + """\".\"""" + table + """\"  
-				(LIKE \"""" + self.pg_conn.dest_schema + """\".\"""" + table + """\")
+				DROP TABLE  IF EXISTS \"""" + self.obf_schema + """\".\"""" + table + """\" ; 
+				CREATE TABLE \"""" + self.obf_schema + """\".\"""" + table + """\"  
+				(LIKE \"""" + self.dest_schema + """\".\"""" + table + """\")
 				;
 			"""
 			self.pg_conn.pgsql_cur.execute(sql_child)
@@ -456,7 +517,7 @@ class pg_engine:
 					 AND is_nullable = 'NO'
 				;
 		"""
-		self.pg_conn.pgsql_cur.execute(sql_alter, (self.pg_conn.schema_obf, table, ))
+		self.pg_conn.pgsql_cur.execute(sql_alter, (self.obf_schema, table, ))
 		alter_stats = self.pg_conn.pgsql_cur.fetchall()
 		for alter in alter_stats:
 			self.pg_conn.pgsql_cur.execute(alter[0])
@@ -508,9 +569,9 @@ class pg_engine:
 			except:
 				col_list.append('"%s"'%(column[0], ))
 				
-		tab_exists=self.truncate_table(table, self.pg_conn.schema_obf)
+		tab_exists=self.truncate_table(table, self.obf_schema)
 		if tab_exists:
-			sql_insert="""INSERT INTO  \"""" + self.pg_conn.schema_obf + """\".\"""" + table + """\"  SELECT """ + ','.join(col_list) + """ FROM  \"""" + self.pg_conn.dest_schema + """\".\"""" + table + """\" ;"""
+			sql_insert="""INSERT INTO  \"""" + self.obf_schema + """\".\"""" + table + """\"  SELECT """ + ','.join(col_list) + """ FROM  \"""" + self.pg_conn.dest_schema + """\".\"""" + table + """\" ;"""
 			self.logger.debug("copying table: %s in obfuscated schema" % (table, ))
 			self.pg_conn.pgsql_cur.execute(sql_insert)
 			
@@ -544,7 +605,7 @@ class pg_engine:
 				self.pg_conn.pgsql_cur.execute(statement[0])
 			except psycopg2.Error as e:
 				if e.pgcode == '42809':
-					self.logger.info("replacing table %s in schema %s with a view. old table is renamed to %s_bak" % (self.pg_conn.schema_obf, statement[2],   statement[1]))
+					self.logger.info("replacing table %s in schema %s with a view. old table is renamed to %s_bak" % (self.obf_schema, statement[2],   statement[1]))
 					sql_rename="""ALTER TABLE "%s"."%s" RENAME TO "%s_bak" ;""" % (self.obf_schema,  statement[1], statement[1])
 					self.pg_conn.pgsql_cur.execute(sql_rename)
 					self.pg_conn.pgsql_cur.execute(statement[0])
@@ -625,7 +686,7 @@ class pg_engine:
 			for table in self.table_ddl:
 				if drop_tables:
 					sql_drop_clear='DROP TABLE IF EXISTS  "%s"."%s" CASCADE ;' % (self.pg_conn.dest_schema, table,)
-					sql_drop_obf='DROP TABLE IF EXISTS  "%s"."%s" CASCADE ;' % (self.pg_conn.schema_obf, table,)
+					sql_drop_obf='DROP TABLE IF EXISTS  "%s"."%s" CASCADE ;' % (self.obf_schema, table,)
 					self.pg_conn.pgsql_cur.execute(sql_drop_clear)
 					self.pg_conn.pgsql_cur.execute(sql_drop_obf)
 				try:
@@ -760,7 +821,7 @@ class pg_engine:
 					pkey_def='ALTER TABLE "'+table_name+'" ADD CONSTRAINT "'+pkey_name+'" PRIMARY KEY ('+index_columns+') ;'
 					table_idx.append(pkey_def)
 					if table_name in table_obf:
-						pkey_def='ALTER TABLE "'+self.pg_conn.schema_obf+'"."'+table_name+'" ADD CONSTRAINT "'+pkey_name+'" PRIMARY KEY ('+index_columns+') ;'
+						pkey_def='ALTER TABLE "'+self.obf_schema+'"."'+table_name+'" ADD CONSTRAINT "'+pkey_name+'" PRIMARY KEY ('+index_columns+') ;'
 						table_idx.append(pkey_def)
 				else:
 					if non_unique==0:
@@ -771,7 +832,7 @@ class pg_engine:
 					idx_def='CREATE '+unique_key+' INDEX '+ index_name+' ON "'+table_name+'" ('+index_columns+');'
 					table_idx.append(idx_def)
 					if table_name in table_obf:
-						idx_def='CREATE '+unique_key+' INDEX '+ index_name+' ON "'+self.pg_conn.schema_obf+'"."'+table_name+'" ('+index_columns+');'
+						idx_def='CREATE '+unique_key+' INDEX '+ index_name+' ON "'+self.obf_schema+'"."'+table_name+'" ('+index_columns+');'
 						table_idx.append(idx_def)
 						
 				self.idx_sequence+=1
