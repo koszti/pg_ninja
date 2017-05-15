@@ -465,12 +465,6 @@ class replica_engine(object):
 		if self.check_running() or self.check_request_exit():
 			sys.exit()
 		dt=datetime.now()
-		str_date=dt.strftime('%Y-%m-%d %H:%M:%S')
-		restart_log = self.global_config.log_dir +"restart.log"
-		with open(restart_log, "ab") as restart_file:
-			restart_file.write("%s - starting replica process \n" % (str_date))
-			restart_file.close()
-		#self.email_alerts.send_start_replica_email()
 		self.pg_eng.set_source_id('running')
 		while True:
 			self.my_eng.run_replica(self.pg_eng)
