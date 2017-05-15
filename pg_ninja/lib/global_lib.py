@@ -7,6 +7,78 @@ import logging
 from tabulate import tabulate
 from logging.handlers  import TimedRotatingFileHandler
 from datetime import datetime
+from distutils.sysconfig import get_python_lib
+from shutil import copy
+
+
+class config_dir(object):
+	""" 
+		Class used to setup the local user configuration directory.
+		The class constructor sets only the class variables for the method set_config.
+		The function get_python_lib() is used to determine the python library where pg_chameleon is installed.
+	"""
+	def __init__(self):
+		"""
+			Class constructor.
+		"""
+		python_lib=get_python_lib()
+		cham_dir = "%s/.pg_ninja" % os.path.expanduser('~')	
+		local_config = "%s/config/" % cham_dir 
+		local_logs = "%s/logs/" % cham_dir 
+		local_pid = "%s/pid/" % cham_dir 
+		self.global_config_example = '%s/pg_ninja/config/config-example.yaml' % python_lib
+		self.local_config_example = '%s/config-example.yaml' % local_config
+		self.global_obfuscation_example = '%s/pg_ninja/config/obfuscation-example.yaml' % python_lib
+		self.local_obfuscation_example = '%s/obfuscation-example.yaml' % local_config
+		self.global_snapshots_example = '%s/pg_ninja/config/snapshots-example.yaml' % python_lib
+		self.local_snapshots_example = '%s/snapshots-example.yaml' % local_config
+		self.conf_dirs=[
+			cham_dir, 
+			local_config, 
+			local_logs, 
+			local_pid, 
+			
+		]
+		
+	def set_config(self):
+		""" 
+			The method loops the list self.conf_dirs creating it only if missing.
+			
+			The method checks the freshness of the config-example.yaml file and copies the new version
+			from the python library determined in the class constructor with get_python_lib().
+			
+			If the configuration file is missing the method copies the file with a different message.
+		
+		"""
+		for confdir in self.conf_dirs:
+			if not os.path.isdir(confdir):
+				print ("creating directory %s" % confdir)
+				os.mkdir(confdir)
+		
+		if os.path.isfile(self.local_config_example):
+			if os.path.getctime(self.global_config_example)>os.path.getctime(self.local_config_example):
+				print ("updating config_example %s" % self.local_config_example)
+				copy(self.global_config_example, self.local_config_example)
+		else:
+			print ("copying config_example %s" % self.local_config_example)
+			copy(self.global_config_example, self.local_config_example)
+			
+		if os.path.isfile(self.local_obfuscation_example):
+			if os.path.getctime(self.global_obfuscation_example)>os.path.getctime(self.local_obfuscation_example):
+				print ("updating obfuscation_example %s" % self.local_obfuscation_example)
+				copy(self.global_obfuscation_example, self.local_obfuscation_example)
+		else:
+			print ("copying obfuscation_example %s" % self.local_obfuscation_example)
+			copy(self.global_obfuscation_example, self.local_obfuscation_example)
+		
+		if os.path.isfile(self.local_snapshots_example):
+			if os.path.getctime(self.global_snapshots_example)>os.path.getctime(self.local_snapshots_example):
+				print ("updating snapshots_example %s" % self.local_snapshots_example)
+				copy(self.global_snapshots_example, self.local_snapshots_example)
+		else:
+			print ("copying snapshots_example %s" % self.local_snapshots_example)
+			copy(self.global_snapshots_example, self.local_snapshots_example)
+			
 
 
 class global_config(object):
@@ -26,17 +98,28 @@ class global_config(object):
 			Class  constructor.
 		"""
 		
-		config_dir='config'
-		config_file = '%s/%s.yaml' % (config_dir, config_name)
 		obfuscation_file='config/obfuscation.yaml'
 		self.snapshots_file='config/snapshots.yaml'
+		
+		python_lib=get_python_lib()
+		cham_dir = "%s/.pg_chameleon" % os.path.expanduser('~')	
+		config_dir = '%s/config/' % cham_dir
+		sql_dir = "%s/pg_chameleon/sql/" % python_lib
+		
+		if os.path.isdir(sql_dir):
+				self.sql_dir = sql_dir
+		else:
+			print("**FATAL - sql directory %s missing "  % self.sql_dir)
+			sys.exit(1)
+			
+		config_file = '%s/%s.yaml' % (config_dir, config_name)
 		if os.path.isfile(config_file):
 			self.config_name = config_name
 			self.config_dir = config_dir
 		else:
 			print("**FATAL - could not find the configuration file %s.yaml in %s"  % (config_name, config_dir))
 			sys.exit(2)
-		
+			
 		conffile=open(config_file, 'rb')
 		confdic=yaml.load(conffile.read())
 		conffile.close()

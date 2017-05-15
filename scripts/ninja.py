@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 import argparse
 from pg_ninja import replica_engine
+from pg_ninja import config_dir
+configdir = config_dir()
+configdir.set_config()
+
 commands = [
 	'create_schema',
 	'init_replica',

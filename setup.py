@@ -18,7 +18,14 @@ sql_up_dir = "/%s/pg_ninja/%s" % (python_lib, sql_up_path)
 
 
 data_files = []
-conf_files = (conf_dir, ['config/config-example.yaml'])
+conf_files = (
+		conf_dir, 
+		[
+			'config/config-example.yaml', 
+			'config/obfuscation-example.yaml', 
+			'config/snapshots-example.yaml'
+		]
+	)
 
 sql_src = ['sql/create_schema.sql', 'sql/drop_schema.sql']
 
@@ -75,12 +82,12 @@ pg_ninja can pull the data from a cascading replica when the MySQL slave is conf
 		"Topic :: Other/Nonlisted Topic"
 	],
 	py_modules=[
-		"pg_chameleon.__init__",
-		"pg_chameleon.lib.global_lib",
-		"pg_chameleon.lib.mysql_lib",
-		"pg_chameleon.lib.pg_lib",
-		"pg_chameleon.lib.sql_util"
-		"pg_chameleon.lib.email_lib"
+		"pg_ninja.__init__",
+		"pg_ninja.lib.global_lib",
+		"pg_ninja.lib.mysql_lib",
+		"pg_ninja.lib.pg_lib",
+		"pg_ninja.lib.sql_util", 
+		"pg_ninja.lib.email_lib"
 	],
 	scripts=[
 		"scripts/ninja.py"
