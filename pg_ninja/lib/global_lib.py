@@ -249,7 +249,7 @@ class replica_engine(object):
 		self.logger.addHandler(fh)
 
 		self.my_eng=mysql_engine(self.global_config, self.logger)
-		self.pg_eng=pg_engine(self.global_config, self.my_eng.my_tables, self.logger)
+		self.pg_eng=pg_engine(self.global_config, self.my_eng.my_tables, self.logger, self.global_config.sql_dir)
 		self.pid_file=self.global_config.pid_file
 		self.exit_file=self.global_config.exit_file
 		self.email_alerts=email_alerts(self.global_config.email_config, self.logger)
