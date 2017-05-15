@@ -147,9 +147,9 @@ class global_config(object):
 			self.log_level=confdic["log_level"]
 			self.log_dest=confdic["log_dest"]
 			self.copy_override=confdic["copy_override"]
-			self.log_file=confdic["log_dir"]+"/"+config_name+'.log'
-			self.pid_file=confdic["pid_dir"]+"/"+config_name+".pid"
-			self.exit_file = confdic["pid_dir"]+"/"+config_name+".lock"
+			self.log_file = os.path.expanduser(confdic["log_dir"])+config_name+'.log'
+			self.pid_file = os.path.expanduser(confdic["pid_dir"])+"/"+config_name+".pid"
+			self.exit_file = os.path.expanduser(confdic["pid_dir"])+"/"+config_name+".lock"
 			
 			self.log_dir=confdic["log_dir"]
 			self.email_config=confdic["email_config"]
