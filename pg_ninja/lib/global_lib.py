@@ -7,6 +7,78 @@ import logging
 from tabulate import tabulate
 from logging.handlers  import TimedRotatingFileHandler
 from datetime import datetime
+from distutils.sysconfig import get_python_lib
+from shutil import copy
+
+
+class config_dir(object):
+	""" 
+		Class used to setup the local user configuration directory.
+		The class constructor sets only the class variables for the method set_config.
+		The function get_python_lib() is used to determine the python library where pg_chameleon is installed.
+	"""
+	def __init__(self):
+		"""
+			Class constructor.
+		"""
+		python_lib=get_python_lib()
+		cham_dir = "%s/.pg_ninja" % os.path.expanduser('~')	
+		local_config = "%s/config/" % cham_dir 
+		local_logs = "%s/logs/" % cham_dir 
+		local_pid = "%s/pid/" % cham_dir 
+		self.global_config_example = '%s/pg_ninja/config/config-example.yaml' % python_lib
+		self.local_config_example = '%s/config-example.yaml' % local_config
+		self.global_obfuscation_example = '%s/pg_ninja/config/obfuscation-example.yaml' % python_lib
+		self.local_obfuscation_example = '%s/obfuscation-example.yaml' % local_config
+		self.global_snapshots_example = '%s/pg_ninja/config/snapshots-example.yaml' % python_lib
+		self.local_snapshots_example = '%s/snapshots-example.yaml' % local_config
+		self.conf_dirs=[
+			cham_dir, 
+			local_config, 
+			local_logs, 
+			local_pid, 
+			
+		]
+		
+	def set_config(self):
+		""" 
+			The method loops the list self.conf_dirs creating it only if missing.
+			
+			The method checks the freshness of the config-example.yaml file and copies the new version
+			from the python library determined in the class constructor with get_python_lib().
+			
+			If the configuration file is missing the method copies the file with a different message.
+		
+		"""
+		for confdir in self.conf_dirs:
+			if not os.path.isdir(confdir):
+				print ("creating directory %s" % confdir)
+				os.mkdir(confdir)
+		
+		if os.path.isfile(self.local_config_example):
+			if os.path.getctime(self.global_config_example)>os.path.getctime(self.local_config_example):
+				print ("updating config_example %s" % self.local_config_example)
+				copy(self.global_config_example, self.local_config_example)
+		else:
+			print ("copying config_example %s" % self.local_config_example)
+			copy(self.global_config_example, self.local_config_example)
+			
+		if os.path.isfile(self.local_obfuscation_example):
+			if os.path.getctime(self.global_obfuscation_example)>os.path.getctime(self.local_obfuscation_example):
+				print ("updating obfuscation_example %s" % self.local_obfuscation_example)
+				copy(self.global_obfuscation_example, self.local_obfuscation_example)
+		else:
+			print ("copying obfuscation_example %s" % self.local_obfuscation_example)
+			copy(self.global_obfuscation_example, self.local_obfuscation_example)
+		
+		if os.path.isfile(self.local_snapshots_example):
+			if os.path.getctime(self.global_snapshots_example)>os.path.getctime(self.local_snapshots_example):
+				print ("updating snapshots_example %s" % self.local_snapshots_example)
+				copy(self.global_snapshots_example, self.local_snapshots_example)
+		else:
+			print ("copying snapshots_example %s" % self.local_snapshots_example)
+			copy(self.global_snapshots_example, self.local_snapshots_example)
+			
 
 
 class global_config(object):
@@ -26,17 +98,28 @@ class global_config(object):
 			Class  constructor.
 		"""
 		
-		config_dir='config'
-		config_file = '%s/%s.yaml' % (config_dir, config_name)
 		obfuscation_file='config/obfuscation.yaml'
 		self.snapshots_file='config/snapshots.yaml'
+		
+		python_lib=get_python_lib()
+		cham_dir = "%s/.pg_ninja" % os.path.expanduser('~')	
+		config_dir = '%s/config/' % cham_dir
+		sql_dir = "%s/pg_ninja/sql/" % python_lib
+		
+		if os.path.isdir(sql_dir):
+				self.sql_dir = sql_dir
+		else:
+			print("**FATAL - sql directory %s missing "  % sql_dir)
+			sys.exit(1)
+			
+		config_file = '%s/%s.yaml' % (config_dir, config_name)
 		if os.path.isfile(config_file):
 			self.config_name = config_name
 			self.config_dir = config_dir
 		else:
 			print("**FATAL - could not find the configuration file %s.yaml in %s"  % (config_name, config_dir))
 			sys.exit(2)
-		
+			
 		conffile=open(config_file, 'rb')
 		confdic=yaml.load(conffile.read())
 		conffile.close()
@@ -64,9 +147,9 @@ class global_config(object):
 			self.log_level=confdic["log_level"]
 			self.log_dest=confdic["log_dest"]
 			self.copy_override=confdic["copy_override"]
-			self.log_file=confdic["log_dir"]+"/"+config_name+'.log'
-			self.pid_file=confdic["pid_dir"]+"/"+config_name+".pid"
-			self.exit_file = confdic["pid_dir"]+"/"+config_name+".lock"
+			self.log_file = os.path.expanduser(confdic["log_dir"])+config_name+'.log'
+			self.pid_file = os.path.expanduser(confdic["pid_dir"])+"/"+config_name+".pid"
+			self.exit_file = os.path.expanduser(confdic["pid_dir"])+"/"+config_name+".lock"
 			
 			self.log_dir=confdic["log_dir"]
 			self.email_config=confdic["email_config"]
@@ -166,7 +249,7 @@ class replica_engine(object):
 		self.logger.addHandler(fh)
 
 		self.my_eng=mysql_engine(self.global_config, self.logger)
-		self.pg_eng=pg_engine(self.global_config, self.my_eng.my_tables, self.logger)
+		self.pg_eng=pg_engine(self.global_config, self.my_eng.my_tables, self.logger, self.global_config.sql_dir)
 		self.pid_file=self.global_config.pid_file
 		self.exit_file=self.global_config.exit_file
 		self.email_alerts=email_alerts(self.global_config.email_config, self.logger)
@@ -382,12 +465,6 @@ class replica_engine(object):
 		if self.check_running() or self.check_request_exit():
 			sys.exit()
 		dt=datetime.now()
-		str_date=dt.strftime('%Y-%m-%d %H:%M:%S')
-		restart_log = self.global_config.log_dir +"restart.log"
-		with open(restart_log, "ab") as restart_file:
-			restart_file.write("%s - starting replica process \n" % (str_date))
-			restart_file.close()
-		#self.email_alerts.send_start_replica_email()
 		self.pg_eng.set_source_id('running')
 		while True:
 			self.my_eng.run_replica(self.pg_eng)

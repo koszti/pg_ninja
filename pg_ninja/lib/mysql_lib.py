@@ -234,6 +234,11 @@ class mysql_engine:
 			elif isinstance(binlogevent, QueryEvent):
 				if binlogevent.query.strip().upper() not in self.stat_skip:
 					grp_length = len(group_insert)
+					log_position = binlogevent.packet.log_pos
+					master_data["File"] = binlogfile
+					master_data["Position"] = log_position
+					master_data["Time"] = event_time
+					close_batch=True
 					if len(group_insert)>0:
 						pg_engine.write_batch(group_insert)
 						group_insert=[]
@@ -241,9 +246,6 @@ class mysql_engine:
 					
 					for token in self.sql_token.tokenised:
 						if len(token)>0:
-							master_data["File"]=binlogfile
-							master_data["Position"]=binlogevent.packet.log_pos
-							master_data["Time"]=event_time
 							self.logger.debug("CAPTURED QUERY- binlogfile %s, position %s. Lenght group insert: %s \n Query: %s " % (binlogfile, binlogevent.packet.log_pos, grp_length, binlogevent.query))
 							self.logger.debug("""TOKEN: %s """ % (token, ))
 							query_data={
