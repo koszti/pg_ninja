@@ -32,8 +32,9 @@ hexify:
     - 'longblob'
     - 'binary'
 
-pid_dir: 'pid/'
-log_dir: 'logs/'
+pid_dir: '~/.pg_ninja/pid/'
+log_dir: '~/.pg_ninja/logs/'
+
 out_dir: '/tmp/'
 log_level: 'debug'
 log_dest: 'stdout'
