@@ -102,14 +102,14 @@ class global_config(object):
 		self.snapshots_file='config/snapshots.yaml'
 		
 		python_lib=get_python_lib()
-		cham_dir = "%s/.pg_chameleon" % os.path.expanduser('~')	
+		cham_dir = "%s/.pg_ninja" % os.path.expanduser('~')	
 		config_dir = '%s/config/' % cham_dir
-		sql_dir = "%s/pg_chameleon/sql/" % python_lib
+		sql_dir = "%s/pg_ninja/sql/" % python_lib
 		
 		if os.path.isdir(sql_dir):
 				self.sql_dir = sql_dir
 		else:
-			print("**FATAL - sql directory %s missing "  % self.sql_dir)
+			print("**FATAL - sql directory %s missing "  % sql_dir)
 			sys.exit(1)
 			
 		config_file = '%s/%s.yaml' % (config_dir, config_name)
