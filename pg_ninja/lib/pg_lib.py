@@ -1261,6 +1261,8 @@ class pg_engine:
 		
 		if token["command"] =="DROP TABLE":
 			query=" %(command)s IF EXISTS \"%(name)s\" CASCADE;" % token
+		elif token["command"] =="TRUNCATE":
+			query=" %(command)s TABLE \"%(name)s\" CASCADE;" % token
 		elif token["command"] =="CREATE TABLE":
 			table_metadata={}
 			table_metadata["columns"]=token["columns"]
