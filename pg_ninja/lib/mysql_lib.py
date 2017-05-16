@@ -215,6 +215,7 @@ class mysql_engine:
 		self.logger.debug("START STREAMING - log_file %s, log_position %s. id_batch: %s " % (log_file, log_position, id_batch))
 		for binlogevent in my_stream:
 			total_events+=1
+			event_time=binlogevent.timestamp
 			if isinstance(binlogevent, RotateEvent):
 				binlogfile=binlogevent.next_binlog
 				position=binlogevent.position
@@ -223,6 +224,7 @@ class mysql_engine:
 					if log_file!=binlogfile:
 						master_data["File"]=binlogfile
 						master_data["Position"]=position
+						master_data["Time"]=event_time
 					if len(group_insert)>0:
 						pg_engine.write_batch(group_insert)
 						group_insert=[]
@@ -232,6 +234,11 @@ class mysql_engine:
 			elif isinstance(binlogevent, QueryEvent):
 				if binlogevent.query.strip().upper() not in self.stat_skip:
 					grp_length = len(group_insert)
+					log_position = binlogevent.packet.log_pos
+					master_data["File"] = binlogfile
+					master_data["Position"] = log_position
+					master_data["Time"] = event_time
+					close_batch=True
 					if len(group_insert)>0:
 						pg_engine.write_batch(group_insert)
 						group_insert=[]
@@ -239,10 +246,8 @@ class mysql_engine:
 					
 					for token in self.sql_token.tokenised:
 						if len(token)>0:
-							master_data["File"]=binlogfile
-							master_data["Position"]=binlogevent.packet.log_pos
 							self.logger.debug("CAPTURED QUERY- binlogfile %s, position %s. Lenght group insert: %s \n Query: %s " % (binlogfile, binlogevent.packet.log_pos, grp_length, binlogevent.query))
-							print token
+							self.logger.debug("""TOKEN: %s """ % (token, ))
 							query_data={
 										"binlog":log_file, 
 										"logpos":log_position, 
@@ -278,6 +283,7 @@ class mysql_engine:
 											"log_table":log_table
 										}
 						event_data={}
+						event_update={}
 						event_data_obf={}
 						if isinstance(binlogevent, DeleteRowsEvent):
 							global_data["action"] = "delete"
@@ -285,6 +291,7 @@ class mysql_engine:
 						elif isinstance(binlogevent, UpdateRowsEvent):
 							global_data["action"] = "update"
 							event_values=row["after_values"]
+							event_update=row["before_values"]
 						elif isinstance(binlogevent, WriteRowsEvent):
 							global_data["action"] = "insert"
 							event_values=row["values"]
@@ -295,7 +302,12 @@ class mysql_engine:
 							column_type=column_data_type["data_type"]
 							if column_type in self.hexify and event_values[column_name]:
 								event_values[column_name]=binascii.hexlify(event_values[column_name])
-
+						for column_name in event_update:
+							column_type=column_map[column_name]
+							if column_type in self.hexify and event_update[column_name]:
+								event_update[column_name]=binascii.hexlify(event_update[column_name]).decode()
+							elif column_type in self.hexify and isinstance(event_update[column_name], bytes):
+								event_update[column_name] = ''
 
 						try:
 							obf_list=self.obfdic[table_name]
@@ -313,17 +325,18 @@ class mysql_engine:
 								self.logger.error("discarded row in obfuscation process.\n global_data:%s \n event_data:%s \n" % (global_data,event_values ))
 
 						event_data = dict(event_data.items() +event_values.items())
-						event_insert={"global_data":global_data,"event_data":event_data}
+						event_insert={"global_data":global_data,"event_data":event_data,  "event_update":event_update}
 						group_insert.append(event_insert)
 
 						if event_values_obf:
 							event_data_obf = dict(event_data_obf.items() +event_values_obf.items())
-							event_obf={"global_data":global_obf,"event_data":event_data_obf }
+							event_obf={"global_data":global_obf,"event_data":event_data_obf ,  "event_update":event_update}
 							group_insert.append(event_obf)
 
 
 						master_data["File"]=log_file
 						master_data["Position"]=log_position
+						master_data["Time"]=event_time
 					if total_events>=self.replica_batch_size:
 						self.logger.debug("total events exceeded. Master data: %s  " % (master_data,  ))
 						total_events=0
@@ -677,11 +690,19 @@ class mysql_engine:
 			insert_data =  self.mysql_con.my_cursor_fallback.fetchall()
 			pg_engine.insert_data(table_name, insert_data , self.my_tables)
 			current_slice=current_slice+1
+	
 	def copy_table_data(self, pg_engine,  limit=10000,  copy_obfuscated=True):
 		out_file='%s/output_copy.csv' % self.out_dir
 		self.logger.info("locking the tables")
 		self.lock_tables()
-		for table_name in self.my_tables:
+		table_list = []
+		if pg_engine.table_limit[0] == '*':
+			for table_name in self.my_tables:
+				table_list.append(table_name)
+		else:
+			table_list = pg_engine.table_limit
+			
+		for table_name in table_list:
 			slice_insert=[]
 			try:
 				copy_limit=self.copy_override[table_name]

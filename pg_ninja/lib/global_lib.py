@@ -4,10 +4,84 @@ import sys
 import os
 import time
 import logging
+from tabulate import tabulate
+from logging.handlers  import TimedRotatingFileHandler
 from datetime import datetime
+from distutils.sysconfig import get_python_lib
+from shutil import copy
 
 
-class global_config:
+class config_dir(object):
+	""" 
+		Class used to setup the local user configuration directory.
+		The class constructor sets only the class variables for the method set_config.
+		The function get_python_lib() is used to determine the python library where pg_chameleon is installed.
+	"""
+	def __init__(self):
+		"""
+			Class constructor.
+		"""
+		python_lib=get_python_lib()
+		cham_dir = "%s/.pg_ninja" % os.path.expanduser('~')	
+		local_config = "%s/config/" % cham_dir 
+		local_logs = "%s/logs/" % cham_dir 
+		local_pid = "%s/pid/" % cham_dir 
+		self.global_config_example = '%s/pg_ninja/config/config-example.yaml' % python_lib
+		self.local_config_example = '%s/config-example.yaml' % local_config
+		self.global_obfuscation_example = '%s/pg_ninja/config/obfuscation-example.yaml' % python_lib
+		self.local_obfuscation_example = '%s/obfuscation-example.yaml' % local_config
+		self.global_snapshots_example = '%s/pg_ninja/config/snapshots-example.yaml' % python_lib
+		self.local_snapshots_example = '%s/snapshots-example.yaml' % local_config
+		self.conf_dirs=[
+			cham_dir, 
+			local_config, 
+			local_logs, 
+			local_pid, 
+			
+		]
+		
+	def set_config(self):
+		""" 
+			The method loops the list self.conf_dirs creating it only if missing.
+			
+			The method checks the freshness of the config-example.yaml file and copies the new version
+			from the python library determined in the class constructor with get_python_lib().
+			
+			If the configuration file is missing the method copies the file with a different message.
+		
+		"""
+		for confdir in self.conf_dirs:
+			if not os.path.isdir(confdir):
+				print ("creating directory %s" % confdir)
+				os.mkdir(confdir)
+		
+		if os.path.isfile(self.local_config_example):
+			if os.path.getctime(self.global_config_example)>os.path.getctime(self.local_config_example):
+				print ("updating config_example %s" % self.local_config_example)
+				copy(self.global_config_example, self.local_config_example)
+		else:
+			print ("copying config_example %s" % self.local_config_example)
+			copy(self.global_config_example, self.local_config_example)
+			
+		if os.path.isfile(self.local_obfuscation_example):
+			if os.path.getctime(self.global_obfuscation_example)>os.path.getctime(self.local_obfuscation_example):
+				print ("updating obfuscation_example %s" % self.local_obfuscation_example)
+				copy(self.global_obfuscation_example, self.local_obfuscation_example)
+		else:
+			print ("copying obfuscation_example %s" % self.local_obfuscation_example)
+			copy(self.global_obfuscation_example, self.local_obfuscation_example)
+		
+		if os.path.isfile(self.local_snapshots_example):
+			if os.path.getctime(self.global_snapshots_example)>os.path.getctime(self.local_snapshots_example):
+				print ("updating snapshots_example %s" % self.local_snapshots_example)
+				copy(self.global_snapshots_example, self.local_snapshots_example)
+		else:
+			print ("copying snapshots_example %s" % self.local_snapshots_example)
+			copy(self.global_snapshots_example, self.local_snapshots_example)
+			
+
+
+class global_config(object):
 	"""
 		This class parses the configuration file which is in config/config.yaml and sets 
 		the class variables used by the other libraries. 
@@ -19,16 +93,33 @@ class global_config:
 		:param command: the command specified on the ninja.py command line
 	
 	"""
-	def __init__(self,command):
+	def __init__(self,  config_name="default"):
 		"""
 			Class  constructor.
 		"""
-		config_file='config/config.yaml'
+		
 		obfuscation_file='config/obfuscation.yaml'
 		self.snapshots_file='config/snapshots.yaml'
-		if not os.path.isfile(config_file):
-			print "**FATAL - configuration file missing **\ncopy config/config-example.yaml to "+config_file+" and set your connection settings."
-			sys.exit()
+		
+		python_lib=get_python_lib()
+		cham_dir = "%s/.pg_ninja" % os.path.expanduser('~')	
+		config_dir = '%s/config/' % cham_dir
+		sql_dir = "%s/pg_ninja/sql/" % python_lib
+		
+		if os.path.isdir(sql_dir):
+				self.sql_dir = sql_dir
+		else:
+			print("**FATAL - sql directory %s missing "  % sql_dir)
+			sys.exit(1)
+			
+		config_file = '%s/%s.yaml' % (config_dir, config_name)
+		if os.path.isfile(config_file):
+			self.config_name = config_name
+			self.config_dir = config_dir
+		else:
+			print("**FATAL - could not find the configuration file %s.yaml in %s"  % (config_name, config_dir))
+			sys.exit(2)
+			
 		conffile=open(config_file, 'rb')
 		confdic=yaml.load(conffile.read())
 		conffile.close()
@@ -56,13 +147,18 @@ class global_config:
 			self.log_level=confdic["log_level"]
 			self.log_dest=confdic["log_dest"]
 			self.copy_override=confdic["copy_override"]
-			self.log_file=confdic["log_dir"]+"/"+command+'.log'
-			self.pid_file=confdic["pid_dir"]+"/replica.pid"
+			self.log_file = os.path.expanduser(confdic["log_dir"])+config_name+'.log'
+			self.pid_file = os.path.expanduser(confdic["pid_dir"])+"/"+config_name+".pid"
+			self.exit_file = os.path.expanduser(confdic["pid_dir"])+"/"+config_name+".lock"
+			
 			self.log_dir=confdic["log_dir"]
 			self.email_config=confdic["email_config"]
-			self.log_append = confdic["log_append"]
+			self.log_days_keep = confdic["log_days_keep"]
 			self.skip_view = confdic["skip_view"]
 			self.out_dir = confdic["out_dir"]
+			self.sleep_loop = confdic["sleep_loop"]
+			self.source_name= confdic["source_name"]
+			self.batch_retention = confdic["batch_retention"]
 			if confdic["obfuscation_file"]:
 				obfuscation_file=confdic["obfuscation_file"]
 		except KeyError as missing_key:
@@ -98,9 +194,28 @@ class global_config:
 		self.snapdic=yaml.load(snpfile.read())
 		snpfile.close()
 		
-
+	def get_source_name(self, config_name = 'default'):
+		"""
+		The method tries to set the parameter source_name determined from the configuration file.
+		The value is used to query the replica catalog in order to get the source sstatus in method list_config().
 		
-class replica_engine:
+		:param config_name: the configuration file to use. If omitted is set to default.
+		"""
+		
+		config_file = '%s/%s.yaml' % (self.config_dir, config_name)
+		self.config_name = config_name
+		if os.path.isfile(config_file):
+			conffile = open(config_file, 'rb')
+			confdic = yaml.load(conffile.read())
+			conffile.close()
+			try:
+				source_name=confdic["source_name"]
+			except:
+				print('FATAL - missing parameter source name in config file %s' % config_file)
+				source_name='NOT CONFIGURED'
+		return source_name
+		
+class replica_engine(object):
 	"""
 		This class wraps the interface to the replica operations and bridges mysql and postgresql engines. 
 		The constructor inits the global configuration class  and setup the mysql and postgresql engines as class attributes. 
@@ -109,23 +224,21 @@ class replica_engine:
 		:param command: the command specified on the pg_ninja.py command line. This value is used to generate the log filename (see the class global_config).
 		
 	"""
-	def __init__(self, command):
+	def __init__(self, config, stdout=False):
 		
-		self.global_config=global_config(command)
+		self.global_config=global_config(config)
 		self.logger = logging.getLogger(__name__)
 		self.logger.setLevel(logging.DEBUG)
 		self.logger.propagate = False
+		self.lst_yes= ['yes',  'Yes', 'y', 'Y']
 		formatter = logging.Formatter("%(asctime)s: [%(levelname)s] - %(filename)s (%(lineno)s): %(message)s", "%b %e %H:%M:%S")
 		
 		if self.global_config.log_dest=='stdout':
 			fh=logging.StreamHandler(sys.stdout)
 			
 		elif self.global_config.log_dest=='file':
-			if self.global_config.log_append:
-				file_mode='a'
-			else:
-				file_mode='w'
-			fh = logging.FileHandler(self.global_config.log_file, file_mode)
+			fh = TimedRotatingFileHandler(self.global_config.log_file, when="d",interval=1,backupCount=self.global_config.log_days_keep)
+		
 		
 		if self.global_config.log_level=='debug':
 			fh.setLevel(logging.DEBUG)
@@ -136,10 +249,11 @@ class replica_engine:
 		self.logger.addHandler(fh)
 
 		self.my_eng=mysql_engine(self.global_config, self.logger)
-		self.pg_eng=pg_engine(self.global_config, self.my_eng.my_tables, self.logger)
+		self.pg_eng=pg_engine(self.global_config, self.my_eng.my_tables, self.logger, self.global_config.sql_dir)
 		self.pid_file=self.global_config.pid_file
-		self.exit_file="pid/exit_process.trg"
+		self.exit_file=self.global_config.exit_file
 		self.email_alerts=email_alerts(self.global_config.email_config, self.logger)
+		self.sleep_loop=self.global_config.sleep_loop
 	
 	
 	def sync_snapshot(self, snap_item, mysql_conn):
@@ -234,7 +348,7 @@ class replica_engine:
 			self.logger.info("Replica already enabled")
 	
 		
-	def sync_obfuscation(self, send_email=True):
+	def sync_obfuscation(self, send_email=True, table='*', cleanup_idx=False):
 		"""
 			the function sync the obfuscated tables using the obfuscation file indicated in the configuration.
 			The replica is stopped and disabled before starting the obfuscation sync.
@@ -242,8 +356,11 @@ class replica_engine:
 			
 			:param send_email=True: if true an email is sent when the process is complete.
 		"""
+		self.pg_eng.table_limit=table.split(',')
 		self.stop_replica(allow_restart=False)
-		self.pg_eng.sync_obfuscation(self.global_config.obfdic)
+		self.pg_eng.set_source_id('initialising')
+		self.pg_eng.sync_obfuscation(self.global_config.obfdic, cleanup_idx)
+		self.pg_eng.set_source_id('initialised')
 		self.logger.info("Sync complete, replica can be restarted")
 		if send_email:
 			self.enable_replica()
@@ -348,21 +465,16 @@ class replica_engine:
 		if self.check_running() or self.check_request_exit():
 			sys.exit()
 		dt=datetime.now()
-		str_date=dt.strftime('%Y-%m-%d %H:%M:%S')
-		restart_log = self.global_config.log_dir +"restart.log"
-		with open(restart_log, "ab") as restart_file:
-			restart_file.write("%s - starting replica process \n" % (str_date))
-			restart_file.close()
-		self.email_alerts.send_start_replica_email()
+		self.pg_eng.set_source_id('running')
 		while True:
 			self.my_eng.run_replica(self.pg_eng)
-			self.logger.debug("batch complete. sleeping 1 second")
-			time.sleep(1)
+			self.logger.info("batch complete. sleeping %s second(s)" % (self.sleep_loop, ))
+			time.sleep(self.sleep_loop)
 			if self.check_request_exit():
-				sys.exit()
+				break
+		self.pg_eng.set_source_id('stopped')
 			
 		
-			
 	def copy_table_data(self, copy_obfus=True):
 		"""
 			The method copies the replicated tables from mysql to postgres.
@@ -384,17 +496,19 @@ class replica_engine:
 			Enable the replica and sends an email of init_replica complete.
 		"""
 		self.stop_replica(allow_restart=False)
-		self.drop_service_schema()
-		self.create_service_schema()
+		self.pg_eng.set_source_id('initialising')
+		self.pg_eng.clean_batch_data()
 		self.create_schema(drop_tables=True)
 		self.copy_table_data()
 		self.create_indices()
 		self.create_views()
+		self.pg_eng.set_source_id('initialised')
 		self.enable_replica()
 		self.email_alerts.send_end_init_replica()
 		
+		
 	
-	def sync_replica(self):
+	def sync_replica(self, table):
 		"""
 			This method is similar to the init_replica with some notable exceptions.
 			The tables on postgresql are not dropped. 
@@ -405,11 +519,83 @@ class replica_engine:
 			The method sync_obfuscation is used to sync the obfuscation in a separate process.
 		"""
 		self.stop_replica(allow_restart=False)
+		self.pg_eng.set_source_id('initialising')
+		self.pg_eng.table_limit=table.split(',')
 		self.pg_eng.get_index_def()
 		self.pg_eng.drop_src_indices()
 		self.pg_eng.truncate_tables()
 		self.copy_table_data(copy_obfus=False)
 		self.pg_eng.create_src_indices()
-		self.sync_obfuscation(False)
+		self.sync_obfuscation(False, table, True)
+		self.pg_eng.set_source_id('initialised')
 		self.enable_replica()
 		self.email_alerts.send_end_sync_replica()
+	
+	def add_source(self):
+		"""
+			register the configuration source in the replica catalogue
+		"""
+		source_name=self.global_config.source_name
+		schema_clear=self.global_config.schema_clear
+		schema_obf=self.global_config.schema_obf
+		self.pg_eng.add_source(source_name, schema_clear, schema_obf)
+
+	def drop_source(self):
+		"""
+			remove the configuration source and all the replica informations associated with the source from the replica catalogue
+		"""
+		source_name = self.global_config.source_name
+		drp_msg = 'Dropping the source %s will remove drop any replica reference.\n Are you sure? YES/No\n'  % source_name
+		if sys.version_info[0] == 3:
+			drop_src = input(drp_msg)
+		else:
+			drop_src = raw_input(drp_msg)
+		if drop_src == 'YES':
+			self.pg_eng.drop_source(self.global_config.source_name)
+		elif drop_src in  self.lst_yes:
+			print('Please type YES all uppercase to confirm')
+		sys.exit()
+		
+	def list_config(self):
+		"""
+			List the available configurations stored in config/
+		"""
+		lst_skip = [
+			'config-example',  
+			'obfuscation-example',  
+			'snapshots-example', 
+			'obfuscation'
+		]
+		list_config = (os.listdir(self.global_config.config_dir))
+		tab_headers = ['Config file',  'Source name',  'Status']
+		tab_body = []
+		
+		for file in list_config:
+			lst_file = file.split('.')
+			file_name = lst_file[0]
+			file_ext = lst_file[1]
+			if file_ext == 'yaml' and file_name not in lst_skip:
+				source_name = self.global_config.get_source_name(file_name)
+				source_status = self.pg_eng.get_source_status(source_name)
+				tab_row = [  '%s.%s' % (file_name, file_ext), source_name, source_status]
+				tab_body.append(tab_row)
+		print(tabulate(tab_body, headers=tab_headers))
+		
+	def show_status(self):
+		"""
+			list the replica status using the configuration files and the replica catalogue
+		"""
+		source_status=self.pg_eng.get_status()
+		tab_headers = ['Config file',  'Sch. clear', 'Sch. obfuscate',  'Status' ,  'Lag',  'Last received event']
+		tab_body = []
+			
+		for status in source_status:
+			source_name = status[0]
+			dest_schema = status[1]
+			source_status = status[2]
+			seconds_behind_master = status[3]
+			last_received_event = status[4]
+			obf_schema = status[5]
+			tab_row = [source_name, dest_schema, obf_schema, source_status, seconds_behind_master, last_received_event ]
+			tab_body.append(tab_row)
+		print(tabulate(tab_body, headers=tab_headers))
