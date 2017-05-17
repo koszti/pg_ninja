@@ -303,7 +303,8 @@ class mysql_engine:
 							if column_type in self.hexify and event_values[column_name]:
 								event_values[column_name]=binascii.hexlify(event_values[column_name])
 						for column_name in event_update:
-							column_type=column_map[column_name]
+							column_data_type=column_map[column_name]
+							column_type=column_data_type["data_type"]
 							if column_type in self.hexify and event_update[column_name]:
 								event_update[column_name]=binascii.hexlify(event_update[column_name])
 							elif column_type in self.hexify and isinstance(event_update[column_name], bytes):
