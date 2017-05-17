@@ -25,6 +25,13 @@ CREATE TABLE sch_chameleon.t_discarded_rows
 
 ALTER TABLE sch_chameleon.t_log_replica ADD COLUMN jsb_event_update jsonb NULL;
 
+UPDATE sch_chameleon.t_log_replica 
+	SET 
+		jsb_event_update=jsb_event_data 
+WHERE 
+		enm_binlog_event='update' 
+	AND	jsb_event_update IS NULL;
+
 CREATE TYPE sch_chameleon.en_src_status
 	AS ENUM ('ready', 'initialising','initialised','stopped','running');
 
