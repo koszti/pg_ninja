@@ -2,7 +2,7 @@
 CREATE SCHEMA IF NOT EXISTS sch_chameleon;
 CREATE OR REPLACE VIEW sch_chameleon.v_version 
  AS
-	SELECT '0.9'::TEXT t_version
+	SELECT '0.10'::TEXT t_version
 ;
 
 CREATE TABLE sch_chameleon.t_discarded_rows
@@ -179,7 +179,7 @@ ALTER TABLE sch_chameleon.t_replica_tables
 	;
 
 
-	
+		
 CREATE OR REPLACE FUNCTION sch_chameleon.fn_process_batch(integer,integer)
 RETURNS BOOLEAN AS
 $BODY$
@@ -441,6 +441,7 @@ $BODY$
     								b_started 
     							AND 	b_processed 
     							AND     NOT b_replayed
+							AND     i_id_source=p_i_source_id
     						ORDER BY 
     							ts_created 
     						LIMIT 1
@@ -470,6 +471,7 @@ $BODY$
 				b_started 
 			AND 	b_processed 
 			AND     NOT b_replayed
+			AND     i_id_source=p_i_source_id
 		;
 
 		END IF;
@@ -478,3 +480,4 @@ $BODY$
 	END;
 $BODY$
 LANGUAGE plpgsql;
+
