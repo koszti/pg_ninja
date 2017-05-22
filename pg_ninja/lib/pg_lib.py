@@ -97,11 +97,12 @@ class pg_engine:
 		self.type_ddl={}
 		self.pg_charset=self.pg_conn.pg_charset
 		self.batch_retention = global_config.batch_retention
-		self.cat_version='0.9'
+		self.cat_version='0.10'
 		self.cat_sql=[
 			{'version':'base','script': 'create_schema.sql'}, 
 			{'version':'0.8','script': 'upgrade/cat_0.8.sql'}, 
 			{'version':'0.9','script': 'upgrade/cat_0.9.sql'}, 
+			{'version':'0.10','script': 'upgrade/cat_0.10.sql'}, 
 		]
 		cat_version=self.get_schema_version()
 		num_schema=(self.check_service_schema())[0]
@@ -1167,6 +1168,7 @@ class pg_engine:
 		self.pg_conn.pgsql_cur.execute(sql_update, (id_batch, ))
 		
 	def process_batch(self, replica_batch_size):
+		self.logger.debug("Replay batch in %s row chunks" % (replica_batch_size, ))
 		batch_loop=True
 		sql_process="""SELECT sch_chameleon.fn_process_batch(%s,%s);"""
 		while batch_loop:
@@ -1174,7 +1176,7 @@ class pg_engine:
 			batch_result=self.pg_conn.pgsql_cur.fetchone()
 			batch_loop=batch_result[0]
 			self.logger.debug("Batch loop value %s" % (batch_loop))
-		self.logger.debug("Cleaning replayed batches older than %s" % (self.batch_retention))
+		self.logger.debug("Cleaning replayed batches older than %s for source %s" % (self.batch_retention, self.i_id_source))
 		sql_cleanup="""DELETE FROM 
 									sch_chameleon.t_replica_batch
 								WHERE
@@ -1182,8 +1184,9 @@ class pg_engine:
 									AND b_processed
 									AND b_replayed
 									AND now()-ts_replayed>%s::interval
+									AND i_id_source=%s
 									 """
-		self.pg_conn.pgsql_cur.execute(sql_cleanup, (self.batch_retention, ))
+		self.pg_conn.pgsql_cur.execute(sql_cleanup, (self.batch_retention, self.i_id_source))
 
 
 	def build_alter_table(self, token):
