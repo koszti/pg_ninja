@@ -145,6 +145,8 @@ class mysql_engine:
 		self.copy_override=global_config.copy_override
 		self.sql_token=sql_token()
 		self.stat_skip = ['BEGIN', 'COMMIT']
+		self.my_schema = global_config.my_database
+		
 			
 	def obfuscate_value(self, column_value, obf_mode, column_data_type):
 		"""
@@ -232,7 +234,11 @@ class mysql_engine:
 					return [master_data, close_batch]
 				
 			elif isinstance(binlogevent, QueryEvent):
-				if binlogevent.query.strip().upper() not in self.stat_skip:
+				try:
+					query_schema = binlogevent.schema.decode()
+				except:
+					query_schema = binlogevent.schema
+				if binlogevent.query.strip().upper() not in self.stat_skip and query_schema == self.my_schema: 
 					grp_length = len(group_insert)
 					log_position = binlogevent.packet.log_pos
 					master_data["File"] = binlogfile
