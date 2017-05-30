@@ -92,6 +92,7 @@ class pg_engine:
 			'set':'text', 
 			'json':'text', 
 			'bool':'boolean', 
+			'boolean':'boolean', 
 		}
 		self.table_ddl={}
 		self.idx_ddl={}
