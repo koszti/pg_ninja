@@ -1050,7 +1050,8 @@ class pg_engine:
 						FROM 
 							t_created
 						WHERE
-							t_replica_batch.ts_created=t_created.ts_created
+								t_replica_batch.ts_created=t_created.ts_created
+							AND	i_id_source=%s
 					RETURNING
 						i_id_batch,
 						t_binlog_name,
@@ -1058,7 +1059,7 @@ class pg_engine:
 						v_log_table
 					;
 					"""
-		self.pg_conn.pgsql_cur.execute(sql_batch, (self.i_id_source, ))
+		self.pg_conn.pgsql_cur.execute(sql_batch, (self.i_id_source, self.i_id_source, ))
 		return self.pg_conn.pgsql_cur.fetchall()
 	
 	
