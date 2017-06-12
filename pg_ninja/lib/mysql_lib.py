@@ -174,18 +174,6 @@ class mysql_engine:
 				column_value=None
 		return column_value
 	
-	def write_query(self, tokenised, pg_engine, query_data):
-		
-		for token in tokenised:
-			if token!={}:
-				query_data["name"]=token["name"]
-				if token["command"]=='CREATE TABLE':
-					self.get_table_metadata(token["name"])
-					pg_token=self.my_tables
-				else:
-					pg_token=token
-				pg_engine.write_ddl(pg_token, query_data, token["command"], self.mysql_con.my_cursor, self.mysql_con.my_database)
-
 	def read_replica(self, batch_data, pg_engine):
 		"""
 		Stream the replica using the batch data.
@@ -261,7 +249,7 @@ class mysql_engine:
 										"batch_id":id_batch, 
 										"log_table":log_table
 							}
-							pg_engine.write_ddl(token, query_data)
+							pg_engine.write_ddl(token, query_data, [table for table in self.obfdic])
 							close_batch=True
 						
 					self.sql_token.reset_lists()

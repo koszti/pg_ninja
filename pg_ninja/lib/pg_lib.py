@@ -99,13 +99,13 @@ class pg_engine:
 		self.type_ddl={}
 		self.pg_charset=self.pg_conn.pg_charset
 		self.batch_retention = global_config.batch_retention
-		self.cat_version='0.11'
+		self.cat_version='0.10'
 		self.cat_sql=[
 			{'version':'base','script': 'create_schema.sql'}, 
 			{'version':'0.8','script': 'upgrade/cat_0.8.sql'}, 
 			{'version':'0.9','script': 'upgrade/cat_0.9.sql'}, 
 			{'version':'0.10','script': 'upgrade/cat_0.10.sql'}, 
-			{'version':'0.11','script': 'upgrade/cat_0.11.sql'}, 
+			
 		]
 		cat_version=self.get_schema_version()
 		num_schema=(self.check_service_schema())[0]
@@ -1192,14 +1192,32 @@ class pg_engine:
 
 
 	def build_alter_table(self, token):
-		""" the function builds the alter table statement from the token idata"""
+		""" 
+			The method builds the alter table statement from the token data.
+			The function currently supports the following statements.
+			DROP TABLE
+			ADD COLUMN 
+			CHANGE
+			MODIFY
+			
+			The change and modify are potential source of breakage for the replica because of 
+			the mysql implicit fallback data types. 
+			For better understanding please have a look to 
+			
+			http://www.cybertec.at/why-favor-postgresql-over-mariadb-mysql/
+			
+			:param token: A dictionary with the tokenised sql statement
+			:return: query the DDL query in the PostgreSQL dialect
+			:rtype: string
+			
+		"""
 		alter_cmd=[]
 		ddl_enum=[]
 		query_cmd=token["command"]
 		table_name=token["name"]
 		for alter_dic in token["alter_cmd"]:
 			if alter_dic["command"] == 'DROP':
-				alter_cmd.append("%(command)s \"%(name)s\" CASCADE" % alter_dic)
+				alter_cmd.append("%(command)s %(name)s CASCADE" % alter_dic)
 			elif alter_dic["command"] == 'ADD':
 				column_type=self.type_dictionary[alter_dic["type"]]
 				if column_type=="enum":
@@ -1228,11 +1246,18 @@ class pg_engine:
 			elif alter_dic["command"] == 'MODIFY':
 				column_type=self.type_dictionary[alter_dic["type"]]
 				column_name=alter_dic["name"]
+				if column_type=="enum":
+					enum_name="enum_"+table_name+"_"+alter_dic["name"]
+					column_type=enum_name
+					sql_drop_enum='DROP TYPE IF EXISTS '+column_type+' CASCADE;'
+					sql_create_enum="CREATE TYPE "+column_type+" AS ENUM ("+alter_dic["dimension"]+");"
+					ddl_enum.append(sql_drop_enum)
+					ddl_enum.append(sql_create_enum)
 				if column_type=="character varying" or column_type=="character" or column_type=='numeric' or column_type=='bit' or column_type=='float':
 						column_type=column_type+"("+str(alter_dic["dimension"])+")"
-				query = """ALTER TABLE "%s" ALTER COLUMN "%s" SET DATA TYPE %s USING "%s"::%s ;""" % (table_name, column_name, column_type, column_name, column_type)
+				query = ' '.join(ddl_enum) + """ALTER TABLE "%s" ALTER COLUMN "%s" SET DATA TYPE %s USING "%s"::%s ;""" % (table_name, column_name, column_type, column_name, column_type)
 				return query
-		query=' '.join(ddl_enum)+" "+query_cmd + ' '+ table_name+ ' ' +', '.join(alter_cmd)+" ;"
+		query = ' '.join(ddl_enum)+" "+query_cmd + ' '+ table_name+ ' ' +', '.join(alter_cmd)+" ;"
 		return query
 
 	
@@ -1289,9 +1314,16 @@ class pg_engine:
 		return query 
 		
 		
-	def write_ddl(self, token, query_data):
-		sql_path=" SET search_path="+self.pg_conn.dest_schema+";"
-		pg_ddl=sql_path+self.gen_query(token)
+	def write_ddl(self, token, query_data, obflist):
+		path_clear=""" SET search_path="%s"; """ % (self.dest_schema, )
+		path_obf= """ SET search_path="%s"; """ % (self.obf_schema, ) 
+		ddl_query=self.gen_query(token)
+		if token["command"] ==  "ALTER TABLE" and token["name"] not in obflist:
+			sql_drop_view = """DROP VIEW IF EXISTS "%s" CASCADE; """ % (token["name"], )
+			sql_create_view = """CREATE OR REPLACE VIEW "%s" AS SELECT * FROM "%s"."%s";""" % (token["name"],self.dest_schema, token["name"] )
+			pg_ddl = path_obf + sql_drop_view + path_clear + ddl_query + path_obf + sql_create_view
+		else:
+			pg_ddl=path_clear+ddl_query
 		log_table=query_data["log_table"]
 		insert_vals=(	query_data["batch_id"], 
 								token["name"],  
