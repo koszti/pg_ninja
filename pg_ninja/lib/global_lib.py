@@ -593,9 +593,9 @@ class replica_engine(object):
 			source_name = status[0]
 			dest_schema = status[1]
 			source_status = status[2]
-			seconds_behind_master = status[3]
+			lag = status[3]
 			last_received_event = status[4]
 			obf_schema = status[5]
-			tab_row = [source_name, dest_schema, obf_schema, source_status, seconds_behind_master, last_received_event ]
+			tab_row = [source_name, dest_schema, obf_schema, source_status, lag, last_received_event ]
 			tab_body.append(tab_row)
 		print(tabulate(tab_body, headers=tab_headers))

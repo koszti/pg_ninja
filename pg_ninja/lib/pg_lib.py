@@ -1563,18 +1563,18 @@ class pg_engine:
 	def get_status(self):
 		"""the function list the sources with the running status and the eventual lag """
 		sql_status="""
-								SELECT
-									t_source,
-									t_dest_schema,
-									enm_status,
-									extract(epoch from now()-ts_last_event)::integer as i_seconds_behind_master,
-									ts_last_event ,
-									t_obf_schema
-								FROM 
-									sch_chameleon.t_sources
-								ORDER BY 
-									t_source
-								; """
+			SELECT
+				t_source,
+				t_dest_schema,
+				enm_status,
+				date_trunc('seconds',now())-ts_last_event lag,
+				ts_last_event ,
+				t_obf_schema
+			FROM 
+				sch_chameleon.t_sources
+			ORDER BY 
+				t_source
+		; """
 		self.pg_conn.pgsql_cur.execute(sql_status)
 		results = self.pg_conn.pgsql_cur.fetchall()
 		return results
