@@ -1218,7 +1218,7 @@ class pg_engine:
 		table_name=token["name"]
 		for alter_dic in token["alter_cmd"]:
 			if alter_dic["command"] == 'DROP':
-				alter_cmd.append("%(command)s %(name)s CASCADE" % alter_dic)
+				alter_cmd.append("%(command)s \"%(name)s\" CASCADE" % alter_dic)
 			elif alter_dic["command"] == 'ADD':
 				column_type=self.type_dictionary[alter_dic["type"]]
 				if column_type=="enum":
