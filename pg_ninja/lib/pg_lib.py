@@ -187,6 +187,7 @@ class pg_engine:
 		
 	def sync_obfuscation(self, obfdic, clean_idx=False):
 		
+		
 		if clean_idx:
 			self.clear_obfuscation_reindex()
 		else:
@@ -195,11 +196,11 @@ class pg_engine:
 				drop_idx = input(drp_msg)
 			else:
 				drop_idx = raw_input(drp_msg)
-		if drop_idx == 'YES':
-			self.clear_obfuscation_reindex()
-		elif drop_idx in self.lst_yes or len(drop_idx) == 0:
-			print('Please type YES all uppercase to confirm')
-			sys.exit()
+			if drop_idx == 'YES':
+				self.clear_obfuscation_reindex()
+			elif drop_idx in self.lst_yes or len(drop_idx) == 0:
+				print('Please type YES all uppercase to confirm')
+				sys.exit()
 		self.drop_null_obf()
 		table_limit = ''
 		if self.table_limit[0] != '*':
