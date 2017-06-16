@@ -395,7 +395,7 @@ class replica_engine(object):
 	
 	def create_service_schema(self):
 		"""
-			Creates the service schema sch_chameleon on the PostgreSQL database. 
+			Creates the service schema sch_ninja on the PostgreSQL database. 
 			The service schema is used by the replica system for tracking the replica status and storing the 
 			replicated row images.
 	

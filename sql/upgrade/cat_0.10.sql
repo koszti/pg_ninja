@@ -1,10 +1,10 @@
-CREATE OR REPLACE VIEW sch_chameleon.v_version 
+CREATE OR REPLACE VIEW sch_ninja.v_version 
  AS
 	SELECT '0.10'::TEXT t_version
 ;
 
 	
-CREATE OR REPLACE FUNCTION sch_chameleon.fn_process_batch(integer,integer)
+CREATE OR REPLACE FUNCTION sch_ninja.fn_process_batch(integer,integer)
 RETURNS BOOLEAN AS
 $BODY$
 	DECLARE
@@ -33,7 +33,7 @@ $BODY$
 						SELECT 
 							i_id_batch 
 						FROM ONLY
-							sch_chameleon.t_replica_batch  
+							sch_ninja.t_replica_batch  
 						WHERE 
 								    b_started 
 							AND 	b_processed 
@@ -58,8 +58,8 @@ $BODY$
 							replace(array_to_string(tab.v_table_pkey,','),'"','') as t_pkeys,
 							array_length(tab.v_table_pkey,1) as i_pkeys
 						FROM 
-							sch_chameleon.t_log_replica  log
-							INNER JOIN sch_chameleon.t_replica_tables tab
+							sch_ninja.t_log_replica  log
+							INNER JOIN sch_ninja.t_replica_tables tab
 								ON
 										tab.v_table_name=log.v_table_name
 									AND tab.v_schema_name=log.v_schema_name
@@ -92,11 +92,11 @@ $BODY$
 				v_t_ddl=format('SET search_path=%I;%s',v_r_rows.v_schema_name,v_r_rows.t_query);
 			    RAISE DEBUG 'DDL: %',v_t_ddl;
 			    EXECUTE  v_t_ddl;
-			    DELETE FROM sch_chameleon.t_log_replica
+			    DELETE FROM sch_ninja.t_log_replica
 			    WHERE
 				    i_id_event=v_r_rows.i_id_event
 			    ;
-				UPDATE ONLY sch_chameleon.t_replica_batch  
+				UPDATE ONLY sch_ninja.t_replica_batch  
 				SET 
 					i_ddl=coalesce(i_ddl,0)+1
 				WHERE
@@ -223,7 +223,7 @@ $BODY$
     			END IF;
     			EXECUTE v_t_sql_rep;
     			
-    			DELETE FROM sch_chameleon.t_log_replica
+    			DELETE FROM sch_ninja.t_log_replica
     		    WHERE
     			    i_id_event=v_r_rows.i_id_event
     		    ;
@@ -234,7 +234,7 @@ $BODY$
 		END LOOP;
 		IF v_i_replayed>0
 		THEN
-			UPDATE ONLY sch_chameleon.t_replica_batch  
+			UPDATE ONLY sch_ninja.t_replica_batch  
 			SET 
 				i_replayed=v_i_replayed,
 				ts_replayed=clock_timestamp()
@@ -250,7 +250,7 @@ $BODY$
 		    v_b_loop=False;
 		    
 		
-		UPDATE ONLY sch_chameleon.t_replica_batch  
+		UPDATE ONLY sch_ninja.t_replica_batch  
 			SET 
 				b_replayed=True,
 				ts_replayed=clock_timestamp()
@@ -260,7 +260,7 @@ $BODY$
     			            SELECT 
     							i_id_batch 
     						FROM ONLY
-    							sch_chameleon.t_replica_batch  
+    							sch_ninja.t_replica_batch  
     						WHERE 
     								b_started 
     							AND 	b_processed 
@@ -273,13 +273,13 @@ $BODY$
 		RETURNING i_id_batch INTO v_i_id_batch
 		;
 
-		DELETE FROM sch_chameleon.t_log_replica
+		DELETE FROM sch_ninja.t_log_replica
     		    WHERE
     			    i_id_batch=v_i_id_batch
     		    ;
 				
 		GET DIAGNOSTICS v_i_skipped = ROW_COUNT;
-		UPDATE ONLY sch_chameleon.t_replica_batch  
+		UPDATE ONLY sch_ninja.t_replica_batch  
 			SET 
 				i_skipped=v_i_skipped
 			WHERE
@@ -290,7 +290,7 @@ $BODY$
 			INTO
 				v_b_loop
 		FROM ONLY
-			sch_chameleon.t_replica_batch  
+			sch_ninja.t_replica_batch  
 		WHERE 
 				b_started 
 			AND 	b_processed 

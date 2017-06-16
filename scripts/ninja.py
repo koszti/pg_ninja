@@ -11,7 +11,6 @@ commands = [
 	'start_replica',
 	'upgrade_schema',
 	'drop_schema', 
-	'take_snapshots', 
 	'sync_obfuscation', 
 	'sync_replica', 
 	'add_source', 
@@ -48,25 +47,25 @@ if args.command in commands:
 		replica.upgrade_service_schema()
 	elif args.command == commands[4]:
 		replica.drop_service_schema()
+	#elif args.command == commands[5]:
+	#	replica.take_snapshot(args.snapshot)
 	elif args.command == commands[5]:
-		replica.take_snapshot(args.snapshot)
-	elif args.command == commands[6]:
 		replica.sync_obfuscation(False, args.table)
-	elif args.command == commands[7]:
+	elif args.command == commands[6]:
 		replica.sync_replica(args.table)
-	elif args.command == commands[8]:
+	elif args.command == commands[7]:
 		replica.add_source()
-	elif args.command == commands[9]:
+	elif args.command == commands[8]:
 		replica.drop_source()
-	elif args.command == commands[10]:
+	elif args.command == commands[9]:
 		replica.list_config()
-	elif args.command == commands[11]:
+	elif args.command == commands[10]:
 		replica.show_status()
-	elif args.command == commands[12]:
+	elif args.command == commands[11]:
 		replica.stop_replica()
-	elif args.command == commands[13]:
+	elif args.command == commands[12]:
 		replica.stop_replica(allow_restart=False)
-	elif args.command == commands[14]:
+	elif args.command == commands[13]:
 		replica.enable_replica()
 		
 

@@ -1,10 +1,10 @@
-CREATE OR REPLACE VIEW sch_chameleon.v_version 
+CREATE OR REPLACE VIEW sch_ninja.v_version 
  AS
 	SELECT '0.9'::TEXT t_version
 ;
 
 
-ALTER TABLE sch_chameleon.t_replica_batch 
+ALTER TABLE sch_ninja.t_replica_batch 
 	ADD COLUMN i_replayed bigint NULL,
 	ADD COLUMN i_skipped bigint NULL,
 	ADD COLUMN i_ddl bigint NULL
@@ -12,7 +12,7 @@ ALTER TABLE sch_chameleon.t_replica_batch
 	;
 
 	
-CREATE TABLE sch_chameleon.t_discarded_rows
+CREATE TABLE sch_ninja.t_discarded_rows
 (
 	i_id_row		bigserial,
 	i_id_batch	bigint NOT NULL,
@@ -23,61 +23,61 @@ CREATE TABLE sch_chameleon.t_discarded_rows
 ;
 
 
-ALTER TABLE sch_chameleon.t_log_replica ADD COLUMN jsb_event_update jsonb NULL;
+ALTER TABLE sch_ninja.t_log_replica ADD COLUMN jsb_event_update jsonb NULL;
 
-UPDATE sch_chameleon.t_log_replica 
+UPDATE sch_ninja.t_log_replica 
 	SET 
 		jsb_event_update=jsb_event_data 
 WHERE 
 		enm_binlog_event='update' 
 	AND	jsb_event_update IS NULL;
 
-CREATE TYPE sch_chameleon.en_src_status
+CREATE TYPE sch_ninja.en_src_status
 	AS ENUM ('ready', 'initialising','initialised','stopped','running');
 
 	
-CREATE TABLE sch_chameleon.t_sources
+CREATE TABLE sch_ninja.t_sources
 (
 	i_id_source	bigserial,
 	t_source		text NOT NULL,
 	t_dest_schema   text NOT NULL,
 	t_obf_schema	  text NOT NULL,
-	enm_status sch_chameleon.en_src_status NOT NULL DEFAULT 'ready',
+	enm_status sch_ninja.en_src_status NOT NULL DEFAULT 'ready',
 	ts_last_event timestamp without time zone,
 	CONSTRAINT pk_t_sources PRIMARY KEY (i_id_source)
 )
 ;
 
 
-CREATE UNIQUE INDEX idx_t_sources_t_source ON sch_chameleon.t_sources(t_source);
-CREATE UNIQUE INDEX idx_t_sources_t_dest_schema ON sch_chameleon.t_sources(t_dest_schema);
-CREATE UNIQUE INDEX idx_t_sources_t_obf_schema ON sch_chameleon.t_sources(t_obf_schema);
+CREATE UNIQUE INDEX idx_t_sources_t_source ON sch_ninja.t_sources(t_source);
+CREATE UNIQUE INDEX idx_t_sources_t_dest_schema ON sch_ninja.t_sources(t_dest_schema);
+CREATE UNIQUE INDEX idx_t_sources_t_obf_schema ON sch_ninja.t_sources(t_obf_schema);
 		
-ALTER TABLE sch_chameleon.t_replica_batch 
+ALTER TABLE sch_ninja.t_replica_batch 
 	ADD COLUMN i_id_source bigint 
 	;
 
-ALTER TABLE sch_chameleon.t_replica_tables
+ALTER TABLE sch_ninja.t_replica_tables
 	ADD COLUMN i_id_source bigint 
 	;
 
-DROP INDEX sch_chameleon.idx_t_replica_batch_binlog_name_position;
+DROP INDEX sch_ninja.idx_t_replica_batch_binlog_name_position;
 CREATE UNIQUE INDEX idx_t_replica_batch_binlog_name_position 
-    ON sch_chameleon.t_replica_batch  (i_id_source,t_binlog_name,i_binlog_position);
+    ON sch_ninja.t_replica_batch  (i_id_source,t_binlog_name,i_binlog_position);
 
-DROP INDEX sch_chameleon.idx_t_replica_batch_ts_created;
+DROP INDEX sch_ninja.idx_t_replica_batch_ts_created;
 CREATE UNIQUE INDEX idx_t_replica_batch_ts_created
-	ON sch_chameleon.t_replica_batch (i_id_source,ts_created);
+	ON sch_ninja.t_replica_batch (i_id_source,ts_created);
 
 
-DROP INDEX sch_chameleon.idx_t_replica_tables_table_schema;
+DROP INDEX sch_ninja.idx_t_replica_tables_table_schema;
 CREATE UNIQUE INDEX idx_t_replica_tables_table_schema
-	ON sch_chameleon.t_replica_tables (i_id_source,v_table_name,v_schema_name);
+	ON sch_ninja.t_replica_tables (i_id_source,v_table_name,v_schema_name);
 
 	
 WITH t_insert AS
 	(
-		INSERT INTO	sch_chameleon.t_sources 
+		INSERT INTO	sch_ninja.t_sources 
 			(t_source,t_dest_schema,t_obf_schema)
         VALUES
         	('default','default','default')
@@ -85,44 +85,44 @@ WITH t_insert AS
     ),
     t_replica AS 
 	(
-		UPDATE sch_chameleon.t_replica_batch 
+		UPDATE sch_ninja.t_replica_batch 
 			SET i_id_source=t_insert.i_id_source
 		FROM
 			t_insert
 	)
-		UPDATE sch_chameleon.t_replica_tables
+		UPDATE sch_ninja.t_replica_tables
 			SET i_id_source=t_insert.i_id_source
 		FROM
 			t_insert
 			;
 			
 
-ALTER TABLE sch_chameleon.t_replica_batch 
+ALTER TABLE sch_ninja.t_replica_batch 
 	ALTER COLUMN i_id_source SET NOT NULL
 	;
 
-ALTER TABLE sch_chameleon.t_replica_tables
+ALTER TABLE sch_ninja.t_replica_tables
 	ALTER COLUMN i_id_source SET NOT NULL
 	;
 
 	
-ALTER TABLE sch_chameleon.t_replica_batch
+ALTER TABLE sch_ninja.t_replica_batch
 	ADD CONSTRAINT fk_t_replica_batch_i_id_source FOREIGN KEY (i_id_source)
-	REFERENCES sch_chameleon.t_sources (i_id_source)
+	REFERENCES sch_ninja.t_sources (i_id_source)
 	ON UPDATE RESTRICT ON DELETE CASCADE
 	;
 
-ALTER TABLE sch_chameleon.t_replica_tables
+ALTER TABLE sch_ninja.t_replica_tables
 	ADD CONSTRAINT fk_t_replica_tables_i_id_source FOREIGN KEY (i_id_source)
-	REFERENCES sch_chameleon.t_sources (i_id_source)
+	REFERENCES sch_ninja.t_sources (i_id_source)
 	ON UPDATE RESTRICT ON DELETE CASCADE
 	;
 
 	
 
-DROP FUNCTION IF EXISTS sch_chameleon.fn_process_batch(integer);
+DROP FUNCTION IF EXISTS sch_ninja.fn_process_batch(integer);
 	
-CREATE OR REPLACE FUNCTION sch_chameleon.fn_process_batch(integer,integer)
+CREATE OR REPLACE FUNCTION sch_ninja.fn_process_batch(integer,integer)
 RETURNS BOOLEAN AS
 $BODY$
 	DECLARE
@@ -151,7 +151,7 @@ $BODY$
 						SELECT 
 							i_id_batch 
 						FROM ONLY
-							sch_chameleon.t_replica_batch  
+							sch_ninja.t_replica_batch  
 						WHERE 
 								    b_started 
 							AND 	b_processed 
@@ -176,8 +176,8 @@ $BODY$
 							replace(array_to_string(tab.v_table_pkey,','),'"','') as t_pkeys,
 							array_length(tab.v_table_pkey,1) as i_pkeys
 						FROM 
-							sch_chameleon.t_log_replica  log
-							INNER JOIN sch_chameleon.t_replica_tables tab
+							sch_ninja.t_log_replica  log
+							INNER JOIN sch_ninja.t_replica_tables tab
 								ON
 										tab.v_table_name=log.v_table_name
 									AND tab.v_schema_name=log.v_schema_name
@@ -210,11 +210,11 @@ $BODY$
 				v_t_ddl=format('SET search_path=%I;%s',v_r_rows.v_schema_name,v_r_rows.t_query);
 			    RAISE DEBUG 'DDL: %',v_t_ddl;
 			    EXECUTE  v_t_ddl;
-			    DELETE FROM sch_chameleon.t_log_replica
+			    DELETE FROM sch_ninja.t_log_replica
 			    WHERE
 				    i_id_event=v_r_rows.i_id_event
 			    ;
-				UPDATE ONLY sch_chameleon.t_replica_batch  
+				UPDATE ONLY sch_ninja.t_replica_batch  
 				SET 
 					i_ddl=coalesce(i_ddl,0)+1
 				WHERE
@@ -341,7 +341,7 @@ $BODY$
     			END IF;
     			EXECUTE v_t_sql_rep;
     			
-    			DELETE FROM sch_chameleon.t_log_replica
+    			DELETE FROM sch_ninja.t_log_replica
     		    WHERE
     			    i_id_event=v_r_rows.i_id_event
     		    ;
@@ -352,7 +352,7 @@ $BODY$
 		END LOOP;
 		IF v_i_replayed>0
 		THEN
-			UPDATE ONLY sch_chameleon.t_replica_batch  
+			UPDATE ONLY sch_ninja.t_replica_batch  
 			SET 
 				i_replayed=v_i_replayed,
 				ts_replayed=clock_timestamp()
@@ -368,7 +368,7 @@ $BODY$
 		    v_b_loop=False;
 		    
 		
-		UPDATE ONLY sch_chameleon.t_replica_batch  
+		UPDATE ONLY sch_ninja.t_replica_batch  
 			SET 
 				b_replayed=True,
 				ts_replayed=clock_timestamp()
@@ -378,7 +378,7 @@ $BODY$
     			            SELECT 
     							i_id_batch 
     						FROM ONLY
-    							sch_chameleon.t_replica_batch  
+    							sch_ninja.t_replica_batch  
     						WHERE 
     								b_started 
     							AND 	b_processed 
@@ -390,13 +390,13 @@ $BODY$
 		RETURNING i_id_batch INTO v_i_id_batch
 		;
 
-		DELETE FROM sch_chameleon.t_log_replica
+		DELETE FROM sch_ninja.t_log_replica
     		    WHERE
     			    i_id_batch=v_i_id_batch
     		    ;
 				
 		GET DIAGNOSTICS v_i_skipped = ROW_COUNT;
-		UPDATE ONLY sch_chameleon.t_replica_batch  
+		UPDATE ONLY sch_ninja.t_replica_batch  
 			SET 
 				i_skipped=v_i_skipped
 			WHERE
@@ -407,7 +407,7 @@ $BODY$
 			INTO
 				v_b_loop
 		FROM ONLY
-			sch_chameleon.t_replica_batch  
+			sch_ninja.t_replica_batch  
 		WHERE 
 				b_started 
 			AND 	b_processed 
