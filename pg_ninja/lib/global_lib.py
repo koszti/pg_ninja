@@ -366,7 +366,8 @@ class replica_engine(object):
 			self.enable_replica()
 			self.email_alerts.send_end_sync_obfuscation()
 			
-	
+		
+		
 	def  create_schema(self, drop_tables=False):
 		"""
 			The method builds a new database schema on PostgreSQL using the metadata extracted from MySQL.
