@@ -190,19 +190,8 @@ class pg_engine:
 		
 		if clean_idx:
 			self.clear_obfuscation_reindex()
-		else:
-			drp_msg = 'Do you want to clean the existing index definitions in t_rebuild_idx?.\n YES/No\n' 
-			if sys.version_info[0] == 3:
-				drop_idx = input(drp_msg)
-			else:
-				drop_idx = raw_input(drp_msg)
-			if drop_idx == 'YES':
-				self.clear_obfuscation_reindex()
-			elif drop_idx in self.lst_yes or len(drop_idx) == 0:
-				print('Please type YES all uppercase to confirm')
-				sys.exit()
-		self.drop_null_obf()
 		table_limit = ''
+		table_limit_pk = ''
 		if self.table_limit[0] != '*':
 			table_limit = self.pg_conn.pgsql_cur.mogrify(""" AND table_name IN  (SELECT unnest(%s))""",(self.table_limit, )).decode()
 			table_limit_pk = self.pg_conn.pgsql_cur.mogrify(""" AND tab.relname IN  (SELECT unnest(%s))""",(self.table_limit, )).decode()
@@ -395,6 +384,7 @@ class pg_engine:
 				self.sync_obf_table(tab, obfdic[tab])
 		
 		self.create_views(obfdic)
+		self.drop_null_obf()
 		
 		
 	def sync_obf_table(self, tab, obfdata):
