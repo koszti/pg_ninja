@@ -977,33 +977,30 @@ class pg_engine:
 		master_data = master_status[0]
 		binlog_name = master_data["File"]
 		binlog_position = master_data["Position"]
-		try:
-			event_time = datetime.datetime.fromtimestamp(master_data["Time"]).isoformat()
-		except:
-			event_time  = None
+		event_time = master_data["Time"]
 		self.logger.debug("master data: table file %s, log name: %s, log position: %s " % (table_file, binlog_name, binlog_position))
 		sql_master="""
-							INSERT INTO sch_ninja.t_replica_batch
-															(
-																i_id_source,
-																t_binlog_name, 
-																i_binlog_position,
-																v_log_table
-															)
-												VALUES (
-																%s,
-																%s,
-																%s,
-																%s
-															)
-							--ON CONFLICT DO NOTHING
-							RETURNING i_id_batch
-							;
-						"""
+			INSERT INTO sch_ninja.t_replica_batch
+											(
+												i_id_source,
+												t_binlog_name, 
+												i_binlog_position,
+												v_log_table
+											)
+								VALUES (
+												%s,
+												%s,
+												%s,
+												%s
+											)
+			--ON CONFLICT DO NOTHING
+			RETURNING i_id_batch
+			;
+		"""
 						
 		sql_event="""UPDATE sch_ninja.t_sources 
 					SET 
-						ts_last_event=%s 
+						ts_last_event=to_timestamp(%s)
 					WHERE 
 						i_id_source=%s; 
 						"""
