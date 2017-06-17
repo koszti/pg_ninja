@@ -1,2 +1,2 @@
 --drop schema
-DROP SCHEMA IF EXISTS sch_chameleon CASCADE;
+DROP SCHEMA IF EXISTS sch_ninja CASCADE;

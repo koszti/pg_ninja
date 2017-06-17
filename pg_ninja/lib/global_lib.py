@@ -366,7 +366,8 @@ class replica_engine(object):
 			self.enable_replica()
 			self.email_alerts.send_end_sync_obfuscation()
 			
-	
+		
+		
 	def  create_schema(self, drop_tables=False):
 		"""
 			The method builds a new database schema on PostgreSQL using the metadata extracted from MySQL.
@@ -395,7 +396,7 @@ class replica_engine(object):
 	
 	def create_service_schema(self):
 		"""
-			Creates the service schema sch_chameleon on the PostgreSQL database. 
+			Creates the service schema sch_ninja on the PostgreSQL database. 
 			The service schema is used by the replica system for tracking the replica status and storing the 
 			replicated row images.
 	

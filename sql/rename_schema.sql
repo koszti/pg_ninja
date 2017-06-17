@@ -1,9 +1,6 @@
-CREATE OR REPLACE VIEW sch_ninja.v_version 
- AS
-	SELECT '0.10'::TEXT t_version
-;
+ALTER SCHEMA sch_chameleon RENAME TO sch_ninja;
 
-	
+
 CREATE OR REPLACE FUNCTION sch_ninja.fn_process_batch(integer,integer)
 RETURNS BOOLEAN AS
 $BODY$
@@ -211,6 +208,7 @@ $BODY$
     								(
     									%s
     								)
+							ON CONFLICT DO NOTHING
     							;',
     							v_r_rows.v_schema_name,
     							v_r_rows.v_table_name,

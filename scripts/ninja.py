@@ -11,7 +11,6 @@ commands = [
 	'start_replica',
 	'upgrade_schema',
 	'drop_schema', 
-	'take_snapshots', 
 	'sync_obfuscation', 
 	'sync_replica', 
 	'add_source', 
@@ -27,12 +26,14 @@ command_help = 'Available commands, ' + ','.join(commands)
 
 table_help =  'Specify the table\'s name to sync. Multiple tables can be specified separated by comma. If omitted all tables will be syncronised.' 
 snap_help = 'Specify the snapshost name to process. If omitted all configurations will be processed'
+clean_help = 'Cleans the index definitions before the re-sync. Use with caution.'
 
 parser = argparse.ArgumentParser(description='Command line for pg_chameleon.',  add_help=True)
 parser.add_argument('command', metavar='command', type=str, help=command_help)
 parser.add_argument('--config', metavar='config', type=str,  default='default',  required=False)
 parser.add_argument('--table', metavar='table', type=str,  default='*',  required=False, help=table_help)
 parser.add_argument('--snapshot', metavar='snapshot', type=str,  default='all',  required=False,  help=snap_help)
+parser.add_argument('--clean', default=False, required=False, help=clean_help, action='store_true')
 
 args = parser.parse_args()
 
@@ -49,24 +50,22 @@ if args.command in commands:
 	elif args.command == commands[4]:
 		replica.drop_service_schema()
 	elif args.command == commands[5]:
-		replica.take_snapshot(args.snapshot)
-	elif args.command == commands[6]:
-		replica.sync_obfuscation(False, args.table)
+		replica.sync_obfuscation(True, args.table, args.clean)
+	#elif args.command == commands[6]:
+	#	replica.sync_replica(args.table)
 	elif args.command == commands[7]:
-		replica.sync_replica(args.table)
-	elif args.command == commands[8]:
 		replica.add_source()
-	elif args.command == commands[9]:
+	elif args.command == commands[8]:
 		replica.drop_source()
-	elif args.command == commands[10]:
+	elif args.command == commands[9]:
 		replica.list_config()
-	elif args.command == commands[11]:
+	elif args.command == commands[10]:
 		replica.show_status()
-	elif args.command == commands[12]:
+	elif args.command == commands[11]:
 		replica.stop_replica()
-	elif args.command == commands[13]:
+	elif args.command == commands[12]:
 		replica.stop_replica(allow_restart=False)
-	elif args.command == commands[14]:
+	elif args.command == commands[13]:
 		replica.enable_replica()
 		
 
