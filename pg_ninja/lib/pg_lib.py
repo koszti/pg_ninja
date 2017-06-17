@@ -587,9 +587,13 @@ class pg_engine:
 							table_name,
 							table_schema,
 							table_name
-							),
+							) as create_view,
 							table_name,
-							table_schema
+							table_schema,
+							format('DROP VIEW IF EXISTS %%I.%%I CASCADE;',
+							%s,
+							table_name
+							) as drop_view
 					FROM
 						information_schema.TABLES 
 					WHERE 
@@ -597,10 +601,11 @@ class pg_engine:
 					AND table_name not in (SELECT unnest(%s))
 					;
 				"""
-		self.pg_conn.pgsql_cur.execute(sql_create, (self.obf_schema, self.dest_schema, table_obf, ))
+		self.pg_conn.pgsql_cur.execute(sql_create, (self.obf_schema, self.dest_schema, table_obf, self.obf_schema,))
 		create_views=self.pg_conn.pgsql_cur.fetchall()
 		for statement in create_views:
 			try:
+				self.pg_conn.pgsql_cur.execute(statement[3])
 				self.pg_conn.pgsql_cur.execute(statement[0])
 			except psycopg2.Error as e:
 				if e.pgcode == '42809':
@@ -610,7 +615,7 @@ class pg_engine:
 					self.pg_conn.pgsql_cur.execute(statement[0])
 				else:
 					self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
-					self.logger.error(statement[0])
+					self.logger.error(statement[3]+statement[0])
 
 
 	def copy_obfuscated(self, obfdic, tables_limit):
