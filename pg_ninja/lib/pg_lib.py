@@ -1357,7 +1357,7 @@ class pg_engine:
 	def truncate_table(self, table_name, schema_name):
 		sql_clean="""
 							SELECT 
-								format('SET lock_timeout=''10s'';TRUNCATE TABLE %%I.%%I;',schemaname,tablename) v_truncate,
+								format('SET lock_timeout=''120s'';TRUNCATE TABLE %%I.%%I;',schemaname,tablename) v_truncate,
 								format('DELETE FROM %%I.%%I;',schemaname,tablename) v_delete,
 								format('VACUUM %%I.%%I;',schemaname,tablename) v_vacuum,
 								format('%%I.%%I',schemaname,tablename) as v_tab,
@@ -1396,7 +1396,7 @@ class pg_engine:
 		
 		sql_clean=""" 
 						SELECT DISTINCT
-							format('SET lock_timeout=''10s'';TRUNCATE TABLE %%I.%%I;',v_schema,v_table) v_truncate,
+							format('SET lock_timeout=''120s'';TRUNCATE TABLE %%I.%%I;',v_schema,v_table) v_truncate,
 							format('DELETE FROM %%I.%%I;',v_schema,v_table) v_delete,
 							format('VACUUM %%I.%%I;',v_schema,v_table) v_vacuum,
 							format('%%I.%%I',v_schema,v_table) as v_tab,
