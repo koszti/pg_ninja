@@ -400,7 +400,10 @@ class pg_engine:
 		self.pg_conn.pgsql_cur.execute(sql_get_drop, (tab, self.obf_schema))	
 		drop_idx=self.pg_conn.pgsql_cur.fetchall()
 		for drop_stat in drop_idx:
-			self.pg_conn.pgsql_cur.execute(drop_stat[0])
+			try:
+				self.pg_conn.pgsql_cur.execute(drop_stat[0])
+			except:
+				print("could not drop the index")
 		
 		self.logger.info("syncronising data for table %s in schema %s " % (tab, self.obf_schema))	
 		self.copy_obf_data(tab, obfdata)
