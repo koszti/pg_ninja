@@ -56,8 +56,8 @@ This is done by the tool running FLUSH TABLE WITH READ LOCK;  .
 pg_ninja can pull the data from a cascading replica when the MySQL slave is configured with log-slave-updates.
 
 """,
-	author="Federico Campoli",
-	author_email="federico.campoli@transferwise.com",
+	author="Transferwise",
+	author_email="info@transferwise.com",
 	url="https://www.transferwise.com/",
 	platforms=[
 		"linux"
@@ -90,7 +90,7 @@ pg_ninja can pull the data from a cascading replica when the MySQL slave is conf
 	install_requires=[
 		'PyMySQL>=0.7.6', 
 		'argparse>=1.2.1', 
-		'mysql-replication>=0.11', 
+		'mysql-replication>=0.13', 
 		'psycopg2>=2.7.0', 
 		'PyYAML>=3.11', 
 		'tabulate>=0.7.7', 
