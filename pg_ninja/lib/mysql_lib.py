@@ -689,7 +689,7 @@ class mysql_engine:
 			pg_engine.insert_data(table_name, insert_data , self.my_tables)
 			current_slice=current_slice+1
 	
-	def copy_table_data(self, pg_engine,  limit=10000,  copy_obfuscated=True):
+	def copy_table_data(self, pg_engine,  copy_max_memory,  copy_obfuscated=True):
 		out_file='%s/output_copy.csv' % self.out_dir
 		self.logger.info("locking the tables")
 		self.lock_tables()
@@ -702,12 +702,7 @@ class mysql_engine:
 			
 		for table_name in table_list:
 			slice_insert=[]
-			try:
-				copy_limit=self.copy_override[table_name]
-				self.logger.info("Overriding copy max limit for table %s to %s" % (table_name, copy_limit))
-			except:
-				copy_limit=limit
-				self.logger.debug("Copy max size is %s for table %s " % (copy_limit, table_name))
+			
 			
 			self.logger.info("copying table "+table_name)
 			table=self.my_tables[table_name]
@@ -715,24 +710,35 @@ class mysql_engine:
 			table_name=table["name"]
 			table_columns=table["columns"]
 			self.logger.debug("estimating rows in "+table_name)
-			sql_count="""
-								SELECT 
-										table_rows
-									FROM 
-										information_schema.TABLES 
-									WHERE 
-											table_schema=%s 
-										AND	table_type='BASE TABLE'
-										AND table_name=%s 
-									;
-	
-							"""
+			sql_count=""" 
+				SELECT 
+					table_rows,
+					CASE
+						WHEN avg_row_length>0
+						then
+							round(("""+copy_max_memory+"""/avg_row_length))
+					ELSE
+						0
+					END as copy_limit
+				FROM 
+					information_schema.TABLES 
+				WHERE 
+						table_schema=%s 
+					AND	table_type='BASE TABLE'
+					AND table_name=%s 
+				;
+			"""
 			self.mysql_con.my_cursor.execute(sql_count, (self.mysql_con.my_database, table_name))
 			count_rows=self.mysql_con.my_cursor.fetchone()
-			num_slices=count_rows["table_rows"]/copy_limit
-			range_slices=range(num_slices+1)
+			total_rows=count_rows["table_rows"]
+			copy_limit=int(count_rows["copy_limit"])
+			if copy_limit == 0:
+				copy_limit=1000000
+			num_slices=int(total_rows//copy_limit)
+			range_slices=list(range(num_slices+1))
 			total_slices=len(range_slices)
-			self.logger.debug(table_name +" will be copied in "+str(total_slices)+" slices" )
+			slice=range_slices[0]
+			self.logger.debug("%s will be copied in %s slices of %s rows"  % (table_name, total_slices, copy_limit))
 			columns_csv=self.generate_select(table_columns, mode="csv")
 			columns_ins=self.generate_select(table_columns, mode="insert")
 			slice=range_slices[0]

@@ -141,7 +141,6 @@ class global_config(object):
 			self.reply_batch_size=confdic["reply_batch_size"]
 			self.tables_limit=confdic["tables_limit"]
 			self.exclude_tables=confdic["exclude_tables"]
-			self.copy_max_size=confdic["copy_max_size"]
 			self.copy_mode=confdic["copy_mode"]
 			self.hexify=confdic["hexify"]
 			self.log_level=confdic["log_level"]
@@ -161,6 +160,22 @@ class global_config(object):
 			self.batch_retention = confdic["batch_retention"]
 			if confdic["obfuscation_file"]:
 				obfuscation_file=confdic["obfuscation_file"]
+			copy_max_memory = str(confdic["copy_max_memory"])[:-1]
+			copy_scale = str(confdic["copy_max_memory"])[-1]
+			try:
+				int(copy_scale)
+				copy_max_memory = confdic["copy_max_memory"]
+			except:
+				if copy_scale =='k':
+					copy_max_memory = str(int(copy_max_memory)*1024)
+				elif copy_scale =='M':
+					copy_max_memory = str(int(copy_max_memory)*1024*1024)
+				elif copy_scale =='G':
+					copy_max_memory = str(int(copy_max_memory)*1024*1024*1024)
+				else:
+					print("**FATAL - invalid suffix in parameter copy_max_memory  (accepted values are (k)ilobytes, (M)egabytes, (G)igabytes.")
+					sys.exit(3)
+			self.copy_max_memory = copy_max_memory
 		except KeyError as missing_key:
 			print "**FATAL - missing parameter %s in configuration file. check config/config-example.yaml for reference" % (missing_key, )
 			sys.exit()
@@ -465,7 +480,6 @@ class replica_engine(object):
 		"""
 		if self.check_running() or self.check_request_exit():
 			sys.exit()
-		dt=datetime.now()
 		self.pg_eng.set_source_id('running')
 		while True:
 			self.my_eng.run_replica(self.pg_eng)
@@ -483,7 +497,7 @@ class replica_engine(object):
 			The copy locks the tables with FLUSH TABLES WITH READ LOCK; This actually locks in read only mode the mysql database.
 			After the copy is complete the table are unlocked.
 		"""
-		self.my_eng.copy_table_data(self.pg_eng, limit=self.global_config.copy_max_size, copy_obfuscated=copy_obfus)
+		self.my_eng.copy_table_data(self.pg_eng, copy_max_memory=self.global_config.copy_max_memory, copy_obfuscated=copy_obfus)
 		self.pg_eng.save_master_status(self.my_eng.master_status, cleanup=True)
 
 	def init_replica(self):
