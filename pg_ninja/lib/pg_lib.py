@@ -82,6 +82,7 @@ class pg_engine:
 			'longblob':'bytea',
 			'blob':'bytea', 
 			'binary':'bytea', 
+			'varbinary':'bytea', 
 			'decimal':'numeric', 
 			'double':'double precision', 
 			'double precision':'double precision', 
