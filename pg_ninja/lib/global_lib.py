@@ -145,7 +145,6 @@ class global_config(object):
 			self.hexify=confdic["hexify"]
 			self.log_level=confdic["log_level"]
 			self.log_dest=confdic["log_dest"]
-			self.copy_override=confdic["copy_override"]
 			self.log_file = os.path.expanduser(confdic["log_dir"])+config_name+'.log'
 			self.pid_file = os.path.expanduser(confdic["pid_dir"])+"/"+config_name+".pid"
 			self.exit_file = os.path.expanduser(confdic["pid_dir"])+"/"+config_name+".lock"
