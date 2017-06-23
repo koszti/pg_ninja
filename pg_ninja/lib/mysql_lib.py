@@ -525,7 +525,7 @@ class mysql_engine:
 												WHEN 
 													data_type IN ('"""+"','".join(self.hexify)+"""')
 												THEN
-													concat('hex(',column_name,')')
+													concat('hex(',column_name,') AS','`',column_name,'`')
 												WHEN 
 													data_type IN ('bit')
 												THEN
@@ -569,7 +569,7 @@ class mysql_engine:
 												WHEN 
 													data_type IN ('"""+"','".join(self.hexify)+"""')
 												THEN
-													concat('hex(',column_name,')')
+													concat('hex(',column_name,') AS','`',column_name,'`')
 												WHEN 
 													data_type IN ('bit')
 												THEN
