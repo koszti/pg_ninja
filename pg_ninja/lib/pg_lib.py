@@ -990,7 +990,7 @@ class pg_engine:
 			event_time = master_data["Time"]
 		except:
 			event_time = None
-			
+
 		self.logger.debug("master data: table file %s, log name: %s, log position: %s " % (table_file, binlog_name, binlog_position))
 		sql_master="""
 			INSERT INTO sch_ninja.t_replica_batch

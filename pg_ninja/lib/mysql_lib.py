@@ -418,144 +418,145 @@ class mysql_engine:
 		
 		
 		
-		sql_columns="""
-				SELECT 
-					column_name,
-					column_default,
-					ordinal_position,
-					data_type,
-					character_maximum_length,
-					extra,
-					column_key,
-					is_nullable,
-					numeric_precision,
-					numeric_scale,
-					CASE 
-						WHEN data_type="enum"
-					THEN	
-						SUBSTRING(COLUMN_TYPE,5)
-					END AS enum_list,
-					CASE
-						WHEN 
-							data_type IN ('"""+"','".join(self.hexify)+"""')
-						THEN
-							concat('hex(',column_name,')')
-						WHEN 
-							data_type IN ('bit')
-						THEN
-							concat('cast(`',column_name,'` AS unsigned)')
-					ELSE
-						concat('`',column_name,'`')
-					END
-					AS column_csv_clear,
-					CASE
-						WHEN
-							column_name IN ('"""+"','".join(date_fields)+"""')
-						THEN
-							concat('DATE_FORMAT(`',column_name,'`,','''%%Y-01-01'')')
-						WHEN
-							column_name IN ('"""+"','".join(normal_noprfx)+"""')
-						THEN
-							concat('substr(','sha2(`',column_name,'`,256),1,',character_maximum_length,')' )
-						WHEN
-							column_name IN ('"""+"','".join(normal_prfx)+"""')
-						THEN
-							(
-							SELECT 
-									concat(
-												'substr(',
-												'concat(substr(`',column_name,'`,',nonhash_start,',',nonhash_length,')',','
-												'sha2(`',column_name,'`,256)',
-												'),',
-												'1,',
-												character_maximum_length,
-												')'
-												
-											)
-								FROM
-								( """ + sql_substr + """) prefix
-								WHERE
-									prefix.column_name=information_schema.COLUMNS.column_name
-								
-							)
-						WHEN 
-							data_type IN ('"""+"','".join(self.hexify)+"""')
-						THEN
-							concat('hex(',column_name,')')
-						WHEN 
-							data_type IN ('bit')
-						THEN
-							concat('cast(`',column_name,'` AS unsigned)')
-					ELSE
-						concat('`',column_name,'`')
-					END
-					AS column_csv_obf,
-					CASE
-						WHEN 
-							data_type IN ('"""+"','".join(self.hexify)+"""')
-						THEN
-							concat('hex(',column_name,')')
-						WHEN 
-							data_type IN ('bit')
-						THEN
-							concat('cast(`',column_name,'` AS unsigned) AS','`',column_name,'`')
-					ELSE
-						concat('`',column_name,'`')
-					END
-					AS column_select_clear,
-					CASE
-						WHEN
-							column_name IN ('"""+"','".join(date_fields)+"""')
-						THEN
-							concat('DATE_FORMAT(`',column_name,'`,','''%%Y-01-01'') AS','`',column_name,'`')
-						WHEN
-							column_name IN ('"""+"','".join(normal_noprfx)+"""')
-						THEN
-							concat('substr(','sha2(`',column_name,'`,256),1,',character_maximum_length,') AS','`',column_name,'`')
-						WHEN
-							column_name IN ('"""+"','".join(normal_prfx)+"""')
-						THEN
-							(
-							SELECT 
-									concat(
-													'substr(',
-													'concat(substr(`',column_name,'`,',nonhash_start,',',nonhash_length,')',','
-													'sha2(`',column_name,'`,256)',
-													'),',
-													'1,',
-													character_maximum_length,
-													') as `',
-													column_name,
-													'`'
-													
-												)
-								FROM
-								( """ + sql_substr + """) prefix
-								WHERE
-									prefix.column_name=information_schema.COLUMNS.column_name
-								
-							)
-						WHEN 
-							data_type IN ('"""+"','".join(self.hexify)+"""')
-						THEN
-							concat('hex(',column_name,')')
-						WHEN 
-							data_type IN ('bit')
-						THEN
-							concat('cast(`',column_name,'` AS unsigned) AS','`',column_name,'`')
-					ELSE
-						concat('`',column_name,'`')
-					END
-					AS column_select_obf
-		FROM 
-					information_schema.COLUMNS 
-		WHERE 
-								table_schema=%s
-					AND 	table_name=%s
-		ORDER BY 
-						ordinal_position
-		;
-	"""
+
+		sql_columns="""SELECT 
+											column_name,
+											column_default,
+											ordinal_position,
+											data_type,
+											character_maximum_length,
+											extra,
+											column_key,
+											is_nullable,
+											numeric_precision,
+											numeric_scale,
+											CASE 
+												WHEN data_type="enum"
+											THEN	
+												SUBSTRING(COLUMN_TYPE,5)
+											END AS enum_list,
+											CASE
+												WHEN 
+													data_type IN ('"""+"','".join(self.hexify)+"""')
+												THEN
+													concat('hex(',column_name,')')
+												WHEN 
+													data_type IN ('bit')
+												THEN
+													concat('cast(`',column_name,'` AS unsigned)')
+											ELSE
+												concat('`',column_name,'`')
+											END
+											AS column_csv_clear,
+											CASE
+												WHEN
+													column_name IN ('"""+"','".join(date_fields)+"""')
+												THEN
+													concat('DATE_FORMAT(`',column_name,'`,','''%%Y-01-01'')')
+												WHEN
+													column_name IN ('"""+"','".join(normal_noprfx)+"""')
+												THEN
+													concat('substr(','sha2(`',column_name,'`,256),1,',character_maximum_length,')' )
+												WHEN
+													column_name IN ('"""+"','".join(normal_prfx)+"""')
+												THEN
+													(
+													SELECT 
+															concat(
+																		'substr(',
+																		'concat(substr(`',column_name,'`,',nonhash_start,',',nonhash_length,')',','
+																		'sha2(`',column_name,'`,256)',
+																		'),',
+																		'1,',
+																		character_maximum_length,
+																		')'
+																		
+																	)
+														FROM
+														( """ + sql_substr + """) prefix
+														WHERE
+															prefix.column_name=information_schema.COLUMNS.column_name
+														
+													)
+												WHEN 
+													data_type IN ('"""+"','".join(self.hexify)+"""')
+												THEN
+													concat('hex(',column_name,')')
+												WHEN 
+													data_type IN ('bit')
+												THEN
+													concat('cast(`',column_name,'` AS unsigned)')
+											ELSE
+												concat('`',column_name,'`')
+											END
+											AS column_csv_obf,
+											CASE
+												WHEN 
+													data_type IN ('"""+"','".join(self.hexify)+"""')
+												THEN
+													concat('hex(',column_name,') AS','`',column_name,'`')
+												WHEN 
+													data_type IN ('bit')
+												THEN
+													concat('cast(`',column_name,'` AS unsigned) AS','`',column_name,'`')
+											ELSE
+												concat('`',column_name,'`')
+											END
+											AS column_select_clear,
+											CASE
+												WHEN
+													column_name IN ('"""+"','".join(date_fields)+"""')
+												THEN
+													concat('DATE_FORMAT(`',column_name,'`,','''%%Y-01-01'') AS','`',column_name,'`')
+												WHEN
+													column_name IN ('"""+"','".join(normal_noprfx)+"""')
+												THEN
+													concat('substr(','sha2(`',column_name,'`,256),1,',character_maximum_length,') AS','`',column_name,'`')
+												WHEN
+													column_name IN ('"""+"','".join(normal_prfx)+"""')
+												THEN
+													(
+													SELECT 
+															concat(
+																			'substr(',
+																			'concat(substr(`',column_name,'`,',nonhash_start,',',nonhash_length,')',','
+																			'sha2(`',column_name,'`,256)',
+																			'),',
+																			'1,',
+																			character_maximum_length,
+																			') as `',
+																			column_name,
+																			'`'
+																			
+																		)
+														FROM
+														( """ + sql_substr + """) prefix
+														WHERE
+															prefix.column_name=information_schema.COLUMNS.column_name
+														
+													)
+												WHEN 
+													data_type IN ('"""+"','".join(self.hexify)+"""')
+												THEN
+													concat('hex(',column_name,') AS','`',column_name,'`')
+												WHEN 
+													data_type IN ('bit')
+												THEN
+													concat('cast(`',column_name,'` AS unsigned) AS','`',column_name,'`')
+											ELSE
+												concat('`',column_name,'`')
+											END
+											AS column_select_obf
+								FROM 
+											information_schema.COLUMNS 
+								WHERE 
+														table_schema=%s
+											AND 	table_name=%s
+								ORDER BY 
+												ordinal_position
+								;
+							"""
+
 		self.mysql_con.my_cursor.execute(sql_columns, (self.mysql_con.my_database, table))
 		column_data=self.mysql_con.my_cursor.fetchall()
 		return column_data
