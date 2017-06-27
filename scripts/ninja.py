@@ -12,7 +12,7 @@ commands = [
 	'upgrade_schema',
 	'drop_schema', 
 	'sync_obfuscation', 
-	'sync_replica', 
+	'add_table', 
 	'add_source', 
 	'drop_source', 
 	'list_config', 
@@ -51,8 +51,8 @@ if args.command in commands:
 		replica.drop_service_schema()
 	elif args.command == commands[5]:
 		replica.sync_obfuscation(True, args.table, args.clean)
-	#elif args.command == commands[6]:
-	#	replica.sync_replica(args.table)
+	elif args.command == commands[6]:
+		replica.add_table(args.table)
 	elif args.command == commands[7]:
 		replica.add_source()
 	elif args.command == commands[8]:

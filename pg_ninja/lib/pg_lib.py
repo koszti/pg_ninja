@@ -1647,3 +1647,23 @@ class pg_engine:
 							"""
 		self.pg_conn.pgsql_cur.execute(sql_delete, (self.i_id_source, ))
 	
+	def check_primary_key(self,table_to_add):
+		sql_check = """
+			SELECT  
+				tab.relname,
+				sch.nspname
+			FROM
+				pg_class tab
+				INNER JOIN pg_namespace sch
+					ON tab.relnamespace = sch.oid 
+				INNER JOIN pg_constraint  pk
+					ON tab.oid = pk.conrelid
+			WHERE
+					pk.contype = 'p'
+				AND	sch.nspname = %s
+				AND	tab.relname  = ANY(%s)
+		"""
+		self.pg_conn.pgsql_cur.execute(sql_check, (self.dest_schema, table_to_add ))
+		tables_pk = self.pg_conn.pgsql_cur.fetchall()
+		return tables_pk
+		

@@ -545,6 +545,24 @@ class replica_engine(object):
 		self.enable_replica()
 		self.email_alerts.send_end_sync_replica()
 	
+	def add_table(self, table):
+		"""
+			This method adds an existing table to the replica.
+			
+		"""
+		
+		if table:
+			table_to_add = table.split(',')
+			self.pg_eng.set_source_id('initialising')
+			tables_pk = self.pg_eng.check_primary_key(table_to_add)
+			self.logger.info("locking the tables")
+			self.my_eng.lock_tables()
+			self.stop_replica(allow_restart=False)
+			self.logger.debug("replaying batch.")
+			self.pg_eng.process_batch(self.global_config.reply_batch_size)
+			self.pg_eng.set_source_id('initialised')
+			self.enable_replica()
+			
 	def add_source(self):
 		"""
 			register the configuration source in the replica catalogue
