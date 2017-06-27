@@ -1650,8 +1650,7 @@ class pg_engine:
 	def check_primary_key(self,table_to_add):
 		sql_check = """
 			SELECT  
-				tab.relname,
-				sch.nspname
+				tab.relname
 			FROM
 				pg_class tab
 				INNER JOIN pg_namespace sch

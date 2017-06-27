@@ -43,37 +43,6 @@ class mysql_connection:
 	
 	
 	
-	def connect_snapshot_ubf(self, snap_data):
-		self.my_connection_ubf=pymysql.connect(host=snap_data["host"],
-							user=snap_data["user"],
-							password=snap_data["passwd"],
-							db=snap_data["my_database"],
-							charset=snap_data["my_charset"],
-							cursorclass=pymysql.cursors.SSCursor)
-							
-		self.my_cursor_ubf=self.my_connection_ubf.cursor()
-		
-	
-	def connect_snapshot(self, snap_data):
-		self.my_connection_ubf=pymysql.connect(host=snap_data["host"],
-							user=snap_data["user"],
-							password=snap_data["passwd"],
-							db=snap_data["my_database"],
-							charset=snap_data["my_charset"],
-							cursorclass=pymysql.cursors.SSCursor)
-							
-		self.my_connection=pymysql.connect(host=snap_data["host"],
-							user=snap_data["user"],
-							password=snap_data["passwd"],
-							db=snap_data["my_database"],
-							charset=snap_data["my_charset"],
-							cursorclass=pymysql.cursors.DictCursor)
-							
-		self.my_cursor_ubf=self.my_connection_ubf.cursor()
-		self.my_cursor=self.my_connection.cursor()
-		self.my_cursor_fallback=self.my_connection.cursor()
-	
-		
 		
 	def connect_db_ubf(self):
 		"""  Establish connection with the database """
@@ -617,6 +586,7 @@ class mysql_engine:
 		self.logger.debug("getting table metadata")
 		table_include=""
 		table_exclude=""
+		print self.mysql_con.tables_limit
 		if table_check:
 			self.logger.debug("extracting the table's metadata for: %s" % (table_check, ))
 			table_include="AND table_name='"+table_check+"'"
@@ -627,20 +597,20 @@ class mysql_engine:
 			if self.mysql_con.exclude_tables:
 				self.logger.debug("excluding from the copy and replica the tables: %s" % ','.join(self.mysql_con.exclude_tables))
 				table_exclude="AND table_name NOT IN ('"+"','".join(self.mysql_con.exclude_tables)+"')"
-		sql_tables="""SELECT 
-											table_schema,
-											table_name
-								FROM 
-											information_schema.TABLES 
-								WHERE 
-														table_type='BASE TABLE' 
-											AND 	table_schema=%s
-											""" + table_include + """
-											""" + table_exclude + """
-								ORDER BY AVG_ROW_LENGTH DESC
-								;
-							"""
-		
+		sql_tables="""
+			SELECT 
+						table_schema,
+						table_name
+			FROM 
+						information_schema.TABLES 
+			WHERE 
+							table_type='BASE TABLE' 
+						AND table_schema=%s
+						""" + table_include + """
+						""" + table_exclude + """
+			ORDER BY AVG_ROW_LENGTH DESC
+			;
+		"""
 		self.mysql_con.my_cursor.execute(sql_tables, (self.mysql_con.my_database))
 		table_list=self.mysql_con.my_cursor.fetchall()
 		for table in table_list:
@@ -689,10 +659,11 @@ class mysql_engine:
 			pg_engine.insert_data(table_name, insert_data , self.my_tables)
 			current_slice=current_slice+1
 	
-	def copy_table_data(self, pg_engine,  copy_max_memory,  copy_obfuscated=True):
+	def copy_table_data(self, pg_engine,  copy_max_memory,  copy_obfuscated=True,  lock_tables=True):
 		out_file='%s/output_copy.csv' % self.out_dir
 		self.logger.info("locking the tables")
-		self.lock_tables()
+		if lock_tables:
+			self.lock_tables()
 		table_list = []
 		if pg_engine.table_limit[0] == '*':
 			for table_name in self.my_tables:
@@ -785,8 +756,9 @@ class mysql_engine:
 				ins_arg.append(columns_ins)
 				ins_arg.append(copy_limit)
 				self.insert_table_data(pg_engine, ins_arg)
-		self.logger.info("releasing the lock")
-		self.unlock_tables()
+		if lock_tables:
+			self.logger.info("releasing the lock")
+			self.unlock_tables()
 		if copy_obfuscated:
 			pg_engine.copy_obfuscated(self.obfdic, self.mysql_con.tables_limit)
 		
@@ -816,333 +788,20 @@ class mysql_engine:
 		except:
 			pass
 
-class mysql_snapshot:
-	def __init__(self, mysql_con, global_config, logger):
-		self.hexify=global_config.hexify
-		self.logger=logger
-		self.out_dir=global_config.out_dir
-		self.my_tables={}
-		self.my_streamer=None
-		self.mysql_con=mysql_con
-		
-	def print_progress (self, iteration, total, table_name):
-		if total>1:
-			self.logger.info("Table %s copied %s %%" % (table_name, round(100 * float(iteration)/float(total), 1)))
-		else:
-			self.logger.info("Table %s copied %s %%" % (table_name, round(100 * float(iteration)/float(total), 1)))
-
-	
-	def get_column_metadata(self, table, obf_list={}):
-		
-		date_fields=[]
-		normal_noprfx=[]
-		normal_prfx=[]
-		sql_prfx=["""SELECT ' ' as column_name,  -100 as nonhash_start, -100 as nonhash_length"""]
-		
-		if obf_list:
-			for field in obf_list:
-				if obf_list[field]["mode"]=="date":
-					date_fields.append(field)
-				elif obf_list[field]["mode"]=="normal" and obf_list[field]["nonhash_length"]==0:
-					normal_noprfx.append(field)
-				elif obf_list[field]["mode"]=="normal" and obf_list[field]["nonhash_length"]>0:
-					normal_prfx.append(field)
-					sql_prfx.append("""SELECT '%s' as column_name,  %s as nonhash_start, %s as nonhash_length""" % (field, obf_list[field]["nonhash_start"], obf_list[field]["nonhash_length"]))
-		sql_substr=' UNION '.join(sql_prfx)
-		
-		
-		
-		sql_columns="""SELECT 
-											column_name,
-											column_default,
-											ordinal_position,
-											data_type,
-											character_maximum_length,
-											extra,
-											column_key,
-											is_nullable,
-											numeric_precision,
-											numeric_scale,
-											CASE 
-												WHEN data_type="enum"
-											THEN	
-												SUBSTRING(COLUMN_TYPE,5)
-											END AS enum_list,
-											CASE
-												WHEN 
-													data_type IN ('"""+"','".join(self.hexify)+"""')
-												THEN
-													concat('hex(',column_name,')')
-												WHEN 
-													data_type IN ('bit')
-												THEN
-													concat('cast(`',column_name,'` AS unsigned)')
-											ELSE
-												concat('`',column_name,'`')
-											END
-											AS column_csv_clear,
-											CASE
-												WHEN
-													column_name IN ('"""+"','".join(date_fields)+"""')
-												THEN
-													concat('DATE_FORMAT(`',column_name,'`,','''%%Y-01-01'')')
-												WHEN
-													column_name IN ('"""+"','".join(normal_noprfx)+"""')
-												THEN
-													concat('substr(','sha2(`',column_name,'`,256),1,',character_maximum_length,')' )
-												WHEN
-													column_name IN ('"""+"','".join(normal_prfx)+"""')
-												THEN
-													(
-													SELECT 
-															concat(
-																		'substr(',
-																		'concat(substr(`',column_name,'`,',nonhash_start,',',nonhash_length,')',','
-																		'sha2(`',column_name,'`,256)',
-																		'),',
-																		'1,',
-																		character_maximum_length,
-																		')'
-																		
-																	)
-														FROM
-														( """ + sql_substr + """) prefix
-														WHERE
-															prefix.column_name=information_schema.COLUMNS.column_name
-														
-													)
-												WHEN 
-													data_type IN ('"""+"','".join(self.hexify)+"""')
-												THEN
-													concat('hex(',column_name,')')
-												WHEN 
-													data_type IN ('bit')
-												THEN
-													concat('cast(`',column_name,'` AS unsigned)')
-											ELSE
-												concat('`',column_name,'`')
-											END
-											AS column_csv_obf,
-											CASE
-												WHEN 
-													data_type IN ('"""+"','".join(self.hexify)+"""')
-												THEN
-													concat('hex(',column_name,')')
-												WHEN 
-													data_type IN ('bit')
-												THEN
-													concat('cast(`',column_name,'` AS unsigned) AS','`',column_name,'`')
-											ELSE
-												concat('`',column_name,'`')
-											END
-											AS column_select_clear,
-											CASE
-												WHEN
-													column_name IN ('"""+"','".join(date_fields)+"""')
-												THEN
-													concat('DATE_FORMAT(`',column_name,'`,','''%%Y-01-01'') AS','`',column_name,'`')
-												WHEN
-													column_name IN ('"""+"','".join(normal_noprfx)+"""')
-												THEN
-													concat('substr(','sha2(`',column_name,'`,256),1,',character_maximum_length,') AS','`',column_name,'`')
-												WHEN
-													column_name IN ('"""+"','".join(normal_prfx)+"""')
-												THEN
-													(
-													SELECT 
-															concat(
-																			'substr(',
-																			'concat(substr(`',column_name,'`,',nonhash_start,',',nonhash_length,')',','
-																			'sha2(`',column_name,'`,256)',
-																			'),',
-																			'1,',
-																			character_maximum_length,
-																			') as `',
-																			column_name,
-																			'`'
-																			
-																		)
-														FROM
-														( """ + sql_substr + """) prefix
-														WHERE
-															prefix.column_name=information_schema.COLUMNS.column_name
-														
-													)
-												WHEN 
-													data_type IN ('"""+"','".join(self.hexify)+"""')
-												THEN
-													concat('hex(',column_name,')')
-												WHEN 
-													data_type IN ('bit')
-												THEN
-													concat('cast(`',column_name,'` AS unsigned) AS','`',column_name,'`')
-											ELSE
-												concat('`',column_name,'`')
-											END
-											AS column_select_obf
-								FROM 
-											information_schema.COLUMNS 
-								WHERE 
-														table_schema=%s
-											AND 	table_name=%s
-								ORDER BY 
-												ordinal_position
-								;
-							"""
-		self.mysql_con.my_cursor.execute(sql_columns, (self.my_database, table))
-		column_data=self.mysql_con.my_cursor.fetchall()
-		return column_data
-	
-	def insert_table_data(self, pg_engine, ins_arg):
-		"""fallback to inserts for table and slices """
-		slice_insert=ins_arg[0]
-		table_name=ins_arg[1]
-		columns_ins=ins_arg[2]
-		copy_limit=ins_arg[3]
-		self.logger.info("Executing inserts for remaining %s slices for table %s. copy limit %s" % (len(slice_insert), table_name, copy_limit))
-		for slice in slice_insert:
-			sql_out="SELECT "+columns_ins+"  FROM "+table_name+" LIMIT "+str(slice*copy_limit)+", "+str(copy_limit)+";"
-			self.mysql_con.my_cursor_fallback.execute(sql_out)
-			insert_data =  self.mysql_con.my_cursor_fallback.fetchall()
-			pg_engine.insert_data(table_name, insert_data , self.my_tables)
-	def get_index_metadata(self, table):
-		sql_index="""SELECT 
-										index_name,
-										non_unique,
-										GROUP_CONCAT(concat('"',column_name,'"') ORDER BY seq_in_index) as index_columns
-									FROM
-										information_schema.statistics
-									WHERE
-														table_schema=%s
-											AND 	table_name=%s
-											AND	index_type = 'BTREE'
-									GROUP BY 
-										table_name,
-										non_unique,
-										index_name
-									;
-							"""
-		self.mysql_con.my_cursor.execute(sql_index, (self.my_database, table))
-		index_data=self.mysql_con.my_cursor.fetchall()
-		return index_data
-		
-	def get_snapshot_metadata(self, snap_data):
-		tables_limit=snap_data["tables_limit"]
-		self.my_database=snap_data["my_database"]
-		self.my_tables={}
-		self.logger.debug("getting snapshot metadata")
-		table_include=""
-		if tables_limit:
-			self.logger.debug("table copy limited to tables: %s" % ','.join(tables_limit))
-			table_include="AND table_name IN ('"+"','".join(tables_limit)+"')"
-		sql_tables="""SELECT 
-											table_schema,
-											table_name
-								FROM 
-											information_schema.TABLES 
-								WHERE 
-														table_type='BASE TABLE' 
-											AND 	table_schema=%s
-											""" + table_include + """
-								ORDER BY AVG_ROW_LENGTH DESC
-								;
-							"""
-		self.mysql_con.my_cursor.execute(sql_tables, (self.my_database, ))
-		table_list=self.mysql_con.my_cursor.fetchall()
-		for table in table_list:
-			column_data=self.get_column_metadata(table["table_name"], )
-			index_data=self.get_index_metadata(table["table_name"])
-			dic_table={'name':table["table_name"], 'columns':column_data,  'indices': index_data}
-			self.my_tables[table["table_name"]]=dic_table
-		
-	def generate_select(self, table_columns, mode="csv"):
-		column_list=[]
-		columns=""
-		if mode=="csv":
-			for column in table_columns:
-					column_list.append("COALESCE(REPLACE("+column["column_csv_clear"]+", '\"', '\"\"'),'NULL') ")
-			columns="REPLACE(CONCAT('\"',CONCAT_WS('\",\"',"+','.join(column_list)+"),'\"'),'\"NULL\"','NULL')"
-		if mode=="insert":
-			for column in table_columns:
-				column_list.append(column["column_select_clear"])
-			columns=','.join(column_list)
-		return columns
-	
-	def copy_table_data(self, pg_engine, snap_data,  limit=10000):
-		out_file='%s/output_copy.csv' % self.out_dir
-		for table_name in self.my_tables:
-			slice_insert=[]
-			copy_limit=limit
-			self.logger.debug("Copy max size is %s for table %s " % (copy_limit, table_name))
-			
-			self.logger.info("copying table "+table_name)
-			table=self.my_tables[table_name]
-			
-			table_name=table["name"]
-			table_columns=table["columns"]
-			self.logger.debug("counting rows in "+table_name)
-			sql_count="""
-								SELECT 
-										table_rows
-									FROM 
-										information_schema.TABLES 
-									WHERE 
-											table_schema=%s 
-										AND	table_type='BASE TABLE'
-										AND table_name=%s 
-									;
-	
-							"""
-			self.mysql_con.my_cursor.execute(sql_count, (self.my_database, table_name))
-			count_rows=self.mysql_con.my_cursor.fetchone()
-			num_slices=count_rows["table_rows"]/copy_limit
-			range_slices=range(num_slices+1)
-			total_slices=len(range_slices)
-			self.logger.debug(table_name +" will be copied in "+str(total_slices)+" slices" )
-			columns_csv=self.generate_select(table_columns, mode="csv")
-			columns_ins=self.generate_select(table_columns, mode="insert")
-			slice=range_slices[0]
-			
-			csv_data=""
-			sql_out="SELECT "+columns_csv+" as data FROM "+table_name+";"
-			self.mysql_con.connect_snapshot_ubf(snap_data)
-			try:
-				self.logger.debug("Executing query for table %s"  % (table_name, ))
-				self.mysql_con.my_cursor_ubf.execute(sql_out)
-			except:
-				self.logger.debug("an error occurred when pulling out the data from the table %s - sql executed: %s" % (table_name, sql_out))
-				print self.mysql_con
-					
-			while True:
-				csv_results = self.mysql_con.my_cursor_ubf.fetchmany(copy_limit)
-				if len(csv_results) == 0:
-					break
-				csv_data="\n".join(d[0] for d in csv_results )
-				
-				if self.mysql_con.copy_mode=='direct':
-					csv_file=StringIO.StringIO()
-					csv_file.write(csv_data)
-					csv_file.seek(0)
-
-				if self.mysql_con.copy_mode=='file':
-					csv_file=codecs.open(out_file, 'wb', self.mysql_con.my_charset)
-					csv_file.write(csv_data)
-					csv_file.close()
-					csv_file=open(out_file, 'rb')
-					
-				try:
-					pg_engine.copy_data(table_name, csv_file, self.my_tables)
-				except:
-					self.logger.info("table %s error in PostgreSQL copy, saving slice number for the fallback to insert statements " % (table_name, ))
-					slice_insert.append(slice)
-				self.print_progress(slice+1,total_slices, table_name)
-				slice+=1
-				csv_file.close()
-			self.mysql_con.disconnect_snapshot_ubf()
-			if len(slice_insert)>0:
-				ins_arg=[]
-				ins_arg.append(slice_insert)
-				ins_arg.append(table_name)
-				ins_arg.append(columns_ins)
-				ins_arg.append(copy_limit)
-				self.insert_table_data(pg_engine, ins_arg)
+	def check_primary_key(self, table_to_add):
+		sql_check = """
+			SELECT
+				table_name
+			FROM 
+				information_schema.key_column_usage 
+			WHERE
+					table_schema=%s
+				AND	table_name in %s
+				AND	constraint_name='PRIMARY'
+		;
+		"""
+		self.mysql_con.connect_db_ubf()
+		self.mysql_con.my_cursor_ubf.execute(sql_check, (self.mysql_con.my_database, table_to_add))
+		tables_pk = self.mysql_con.my_cursor_ubf.fetchall()
+		self.mysql_con.disconnect_db_ubf()
+		return tables_pk

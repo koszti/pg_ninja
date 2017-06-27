@@ -1,4 +1,4 @@
-from pg_ninja import mysql_connection, mysql_engine, pg_engine, mysql_snapshot, email_alerts
+from pg_ninja import mysql_connection, mysql_engine, pg_engine,  email_alerts
 import yaml
 import sys
 import os
@@ -269,63 +269,6 @@ class replica_engine(object):
 		self.email_alerts=email_alerts(self.global_config.email_config, self.logger)
 		self.sleep_loop=self.global_config.sleep_loop
 	
-	
-	def sync_snapshot(self, snap_item, mysql_conn):
-		"""
-			This method syncronise a snaphost. Requires a valid snapshot name. See the snapshot-example.yaml
-			for the snapshot details.
-		"""
-		snap_data=self.global_config.snapdic[snap_item]
-		try:
-			drop_tables = snap_data["drop_tables"]
-		except:
-			drop_tables = True
-		#try:
-		self.logger.info("starting snapshot for item %s" % snap_item )
-		mysql_conn.connect_snapshot(snap_data)
-		mysql_snap=mysql_snapshot(mysql_conn, self.global_config, self.logger)
-		mysql_snap.get_snapshot_metadata(snap_data)
-		pg_eng=pg_engine(self.global_config, mysql_snap.my_tables, self.logger)
-		pg_eng.pg_conn.disconnect_db()
-		pg_eng.pg_conn.connect_db(destination_schema=snap_data["destination_schema"])
-		
-		pg_eng.create_schema()
-		self.logger.info("Loading snapshot for %s"  % snap_item)
-		
-		if drop_tables:
-			pg_eng.build_tab_ddl()
-			pg_eng.create_tables(True, False)
-			mysql_snap.copy_table_data(pg_eng, snap_data, limit=snap_data["copy_max_size"])
-			pg_eng.build_idx_ddl({})
-			pg_eng.create_indices()
-		else:
-			pg_eng.get_index_def(snap_data["tables_limit"])
-			pg_eng.drop_src_indices()
-			pg_eng.truncate_tables()
-			mysql_snap.copy_table_data(pg_eng, snap_data, limit=snap_data["copy_max_size"])
-			pg_eng.create_src_indices()
-			
-		pg_eng.reset_sequences(destination_schema=snap_data["destination_schema"])
-		mysql_conn.disconnect_snapshot()
-	
-	def take_snapshot(self, snapshot):
-		"""
-			method to execute the snapshots stored in the snapshot configuration file (see global_config for the details). 
-			
-			:param snapshot: the snapshot name. if the value is 'all' then the process will loop trough all the snapshots available.
-			
-		"""
-		mysql_conn=mysql_connection(self.global_config)
-		self.global_config.load_snapshots()
-		if snapshot == 'all':
-			for snap_item in self.global_config.snapdic:
-				self.sync_snapshot(snap_item,  mysql_conn)
-		else:
-			try:
-				self.sync_snapshot(snapshot,  mysql_conn)
-			except:
-				self.logger.debug("Snapshot %s not present in configuration file"  % snapshot)
-				sys.exit()
 				
 				
 	def wait_for_replica_end(self):
@@ -554,14 +497,28 @@ class replica_engine(object):
 		if table:
 			table_to_add = table.split(',')
 			self.pg_eng.set_source_id('initialising')
-			tables_pk = self.pg_eng.check_primary_key(table_to_add)
-			self.logger.info("locking the tables")
-			self.my_eng.lock_tables()
-			self.stop_replica(allow_restart=False)
-			self.logger.debug("replaying batch.")
-			self.pg_eng.process_batch(self.global_config.reply_batch_size)
+			self.logger.info("finding the tables with primary key")
+			#tables_pk = self.pg_eng.check_primary_key(table_to_add)
+			tables_pk = self.my_eng.check_primary_key(table_to_add)
+			table_to_add = [tab[0] for tab in tables_pk]
+			if len(table_to_add)>0:
+				self.logger.info("locking the tables on MySQL")
+				self.my_eng.lock_tables()
+				self.logger.info("Stopping the replica")
+				self.stop_replica(allow_restart=False)
+				self.logger.info("processing the not replayed batches")
+				self.pg_eng.process_batch(self.global_config.reply_batch_size)
+				self.logger.info("adding the tables")
+				self.my_eng.mysql_con.tables_limit = table_to_add
+				self.my_eng.get_table_metadata()
+				self.pg_eng.table_metadata = self.my_eng.my_tables
+				self.pg_eng.build_tab_ddl()
+				self.create_schema(drop_tables=True)
+				self.my_eng.copy_table_data(self.pg_eng, copy_max_memory=self.global_config.copy_max_memory, copy_obfuscated=False, lock_tables=False)
+				self.create_indices()
+				self.enable_replica()
 			self.pg_eng.set_source_id('initialised')
-			self.enable_replica()
+
 			
 	def add_source(self):
 		"""
