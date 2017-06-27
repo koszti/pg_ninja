@@ -514,8 +514,10 @@ class replica_engine(object):
 				self.pg_eng.table_metadata = self.my_eng.my_tables
 				self.pg_eng.build_tab_ddl()
 				self.create_schema(drop_tables=True)
-				self.my_eng.copy_table_data(self.pg_eng, copy_max_memory=self.global_config.copy_max_memory, copy_obfuscated=False, lock_tables=False)
+				self.my_eng.copy_table_data(self.pg_eng, copy_max_memory=self.global_config.copy_max_memory, copy_obfuscated=True, lock_tables=False)
+				self.my_eng.unlock_tables()
 				self.create_indices()
+				self.create_views()
 				self.enable_replica()
 			self.pg_eng.set_source_id('initialised')
 

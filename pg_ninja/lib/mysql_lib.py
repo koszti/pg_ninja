@@ -586,7 +586,6 @@ class mysql_engine:
 		self.logger.debug("getting table metadata")
 		table_include=""
 		table_exclude=""
-		print self.mysql_con.tables_limit
 		if table_check:
 			self.logger.debug("extracting the table's metadata for: %s" % (table_check, ))
 			table_include="AND table_name='"+table_check+"'"
