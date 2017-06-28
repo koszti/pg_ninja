@@ -1,4 +1,4 @@
-from pg_ninja import mysql_connection, mysql_engine, pg_engine, mysql_snapshot, email_alerts
+from pg_ninja import mysql_connection, mysql_engine, pg_engine,  email_alerts
 import yaml
 import sys
 import os
@@ -141,12 +141,10 @@ class global_config(object):
 			self.reply_batch_size=confdic["reply_batch_size"]
 			self.tables_limit=confdic["tables_limit"]
 			self.exclude_tables=confdic["exclude_tables"]
-			self.copy_max_size=confdic["copy_max_size"]
 			self.copy_mode=confdic["copy_mode"]
 			self.hexify=confdic["hexify"]
 			self.log_level=confdic["log_level"]
 			self.log_dest=confdic["log_dest"]
-			self.copy_override=confdic["copy_override"]
 			self.log_file = os.path.expanduser(confdic["log_dir"])+config_name+'.log'
 			self.pid_file = os.path.expanduser(confdic["pid_dir"])+"/"+config_name+".pid"
 			self.exit_file = os.path.expanduser(confdic["pid_dir"])+"/"+config_name+".lock"
@@ -161,6 +159,22 @@ class global_config(object):
 			self.batch_retention = confdic["batch_retention"]
 			if confdic["obfuscation_file"]:
 				obfuscation_file=confdic["obfuscation_file"]
+			copy_max_memory = str(confdic["copy_max_memory"])[:-1]
+			copy_scale = str(confdic["copy_max_memory"])[-1]
+			try:
+				int(copy_scale)
+				copy_max_memory = confdic["copy_max_memory"]
+			except:
+				if copy_scale =='k':
+					copy_max_memory = str(int(copy_max_memory)*1024)
+				elif copy_scale =='M':
+					copy_max_memory = str(int(copy_max_memory)*1024*1024)
+				elif copy_scale =='G':
+					copy_max_memory = str(int(copy_max_memory)*1024*1024*1024)
+				else:
+					print("**FATAL - invalid suffix in parameter copy_max_memory  (accepted values are (k)ilobytes, (M)egabytes, (G)igabytes.")
+					sys.exit(3)
+			self.copy_max_memory = copy_max_memory
 		except KeyError as missing_key:
 			print "**FATAL - missing parameter %s in configuration file. check config/config-example.yaml for reference" % (missing_key, )
 			sys.exit()
@@ -255,63 +269,6 @@ class replica_engine(object):
 		self.email_alerts=email_alerts(self.global_config.email_config, self.logger)
 		self.sleep_loop=self.global_config.sleep_loop
 	
-	
-	def sync_snapshot(self, snap_item, mysql_conn):
-		"""
-			This method syncronise a snaphost. Requires a valid snapshot name. See the snapshot-example.yaml
-			for the snapshot details.
-		"""
-		snap_data=self.global_config.snapdic[snap_item]
-		try:
-			drop_tables = snap_data["drop_tables"]
-		except:
-			drop_tables = True
-		#try:
-		self.logger.info("starting snapshot for item %s" % snap_item )
-		mysql_conn.connect_snapshot(snap_data)
-		mysql_snap=mysql_snapshot(mysql_conn, self.global_config, self.logger)
-		mysql_snap.get_snapshot_metadata(snap_data)
-		pg_eng=pg_engine(self.global_config, mysql_snap.my_tables, self.logger)
-		pg_eng.pg_conn.disconnect_db()
-		pg_eng.pg_conn.connect_db(destination_schema=snap_data["destination_schema"])
-		
-		pg_eng.create_schema()
-		self.logger.info("Loading snapshot for %s"  % snap_item)
-		
-		if drop_tables:
-			pg_eng.build_tab_ddl()
-			pg_eng.create_tables(True, False)
-			mysql_snap.copy_table_data(pg_eng, snap_data, limit=snap_data["copy_max_size"])
-			pg_eng.build_idx_ddl({})
-			pg_eng.create_indices()
-		else:
-			pg_eng.get_index_def(snap_data["tables_limit"])
-			pg_eng.drop_src_indices()
-			pg_eng.truncate_tables()
-			mysql_snap.copy_table_data(pg_eng, snap_data, limit=snap_data["copy_max_size"])
-			pg_eng.create_src_indices()
-			
-		pg_eng.reset_sequences(destination_schema=snap_data["destination_schema"])
-		mysql_conn.disconnect_snapshot()
-	
-	def take_snapshot(self, snapshot):
-		"""
-			method to execute the snapshots stored in the snapshot configuration file (see global_config for the details). 
-			
-			:param snapshot: the snapshot name. if the value is 'all' then the process will loop trough all the snapshots available.
-			
-		"""
-		mysql_conn=mysql_connection(self.global_config)
-		self.global_config.load_snapshots()
-		if snapshot == 'all':
-			for snap_item in self.global_config.snapdic:
-				self.sync_snapshot(snap_item,  mysql_conn)
-		else:
-			try:
-				self.sync_snapshot(snapshot,  mysql_conn)
-			except:
-				self.logger.debug("Snapshot %s not present in configuration file"  % snapshot)
-				sys.exit()
 				
 				
 	def wait_for_replica_end(self):
@@ -465,7 +422,6 @@ class replica_engine(object):
 		"""
 		if self.check_running() or self.check_request_exit():
 			sys.exit()
-		dt=datetime.now()
 		self.pg_eng.set_source_id('running')
 		while True:
 			self.my_eng.run_replica(self.pg_eng)
@@ -483,7 +439,7 @@ class replica_engine(object):
 			The copy locks the tables with FLUSH TABLES WITH READ LOCK; This actually locks in read only mode the mysql database.
 			After the copy is complete the table are unlocked.
 		"""
-		self.my_eng.copy_table_data(self.pg_eng, limit=self.global_config.copy_max_size, copy_obfuscated=copy_obfus)
+		self.my_eng.copy_table_data(self.pg_eng, copy_max_memory=self.global_config.copy_max_memory, copy_obfuscated=copy_obfus)
 		self.pg_eng.save_master_status(self.my_eng.master_status, cleanup=True)
 
 	def init_replica(self):
@@ -532,6 +488,40 @@ class replica_engine(object):
 		self.enable_replica()
 		self.email_alerts.send_end_sync_replica()
 	
+	def add_table(self, table):
+		"""
+			This method adds an existing table to the replica.
+			
+		"""
+		
+		if table:
+			table_to_add = table.split(',')
+			self.pg_eng.set_source_id('initialising')
+			self.logger.info("finding the tables with primary key")
+			#tables_pk = self.pg_eng.check_primary_key(table_to_add)
+			tables_pk = self.my_eng.check_primary_key(table_to_add)
+			table_to_add = [tab[0] for tab in tables_pk]
+			if len(table_to_add)>0:
+				self.logger.info("locking the tables on MySQL")
+				self.my_eng.lock_tables()
+				self.logger.info("Stopping the replica")
+				self.stop_replica(allow_restart=False)
+				self.logger.info("processing the not replayed batches")
+				self.pg_eng.process_batch(self.global_config.reply_batch_size)
+				self.logger.info("adding the tables")
+				self.my_eng.mysql_con.tables_limit = table_to_add
+				self.my_eng.get_table_metadata()
+				self.pg_eng.table_metadata = self.my_eng.my_tables
+				self.pg_eng.build_tab_ddl()
+				self.create_schema(drop_tables=True)
+				self.my_eng.copy_table_data(self.pg_eng, copy_max_memory=self.global_config.copy_max_memory, copy_obfuscated=True, lock_tables=False)
+				self.my_eng.unlock_tables()
+				self.create_indices()
+				self.create_views()
+				self.enable_replica()
+			self.pg_eng.set_source_id('initialised')
+
+			
 	def add_source(self):
 		"""
 			register the configuration source in the replica catalogue

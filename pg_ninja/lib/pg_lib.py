@@ -990,6 +990,7 @@ class pg_engine:
 			event_time = master_data["Time"]
 		except:
 			event_time = None
+
 		self.logger.debug("master data: table file %s, log name: %s, log position: %s " % (table_file, binlog_name, binlog_position))
 		sql_master="""
 			INSERT INTO sch_ninja.t_replica_batch
@@ -1646,3 +1647,22 @@ class pg_engine:
 							"""
 		self.pg_conn.pgsql_cur.execute(sql_delete, (self.i_id_source, ))
 	
+	def check_primary_key(self,table_to_add):
+		sql_check = """
+			SELECT  
+				tab.relname
+			FROM
+				pg_class tab
+				INNER JOIN pg_namespace sch
+					ON tab.relnamespace = sch.oid 
+				INNER JOIN pg_constraint  pk
+					ON tab.oid = pk.conrelid
+			WHERE
+					pk.contype = 'p'
+				AND	sch.nspname = %s
+				AND	tab.relname  = ANY(%s)
+		"""
+		self.pg_conn.pgsql_cur.execute(sql_check, (self.dest_schema, table_to_add ))
+		tables_pk = self.pg_conn.pgsql_cur.fetchall()
+		return tables_pk
+		
