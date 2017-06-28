@@ -30,8 +30,6 @@ class config_dir(object):
 		self.local_config_example = '%s/config-example.yaml' % local_config
 		self.global_obfuscation_example = '%s/pg_ninja/config/obfuscation-example.yaml' % python_lib
 		self.local_obfuscation_example = '%s/obfuscation-example.yaml' % local_config
-		self.global_snapshots_example = '%s/pg_ninja/config/snapshots-example.yaml' % python_lib
-		self.local_snapshots_example = '%s/snapshots-example.yaml' % local_config
 		self.conf_dirs=[
 			cham_dir, 
 			local_config, 
@@ -71,15 +69,7 @@ class config_dir(object):
 			print ("copying obfuscation_example %s" % self.local_obfuscation_example)
 			copy(self.global_obfuscation_example, self.local_obfuscation_example)
 		
-		if os.path.isfile(self.local_snapshots_example):
-			if os.path.getctime(self.global_snapshots_example)>os.path.getctime(self.local_snapshots_example):
-				print ("updating snapshots_example %s" % self.local_snapshots_example)
-				copy(self.global_snapshots_example, self.local_snapshots_example)
-		else:
-			print ("copying snapshots_example %s" % self.local_snapshots_example)
-			copy(self.global_snapshots_example, self.local_snapshots_example)
-			
-
+		
 
 class global_config(object):
 	"""
@@ -99,7 +89,6 @@ class global_config(object):
 		"""
 		
 		obfuscation_file='config/obfuscation.yaml'
-		self.snapshots_file='config/snapshots.yaml'
 		
 		python_lib=get_python_lib()
 		cham_dir = "%s/.pg_ninja" % os.path.expanduser('~')	
@@ -192,21 +181,12 @@ class global_config(object):
 			
 			:param obfuscation_file: the yaml file with the obfuscation mappings
 		"""
-		if not os.path.isfile(obfuscation_file):
-			print "**FATAL - obfuscation file missing or invalid in %s **\ncopy change the obfuscation_file parameter in the connfiguration file." % (obfuscation_file)
-			sys.exit()
-		obfile=open(obfuscation_file, 'rb')
-		self.obfdic=yaml.load(obfile.read())
-		obfile.close()
-	
-	def load_snapshots(self):
-		"""
-			Reads the file with the snapshot definitions.
-			This method  is called when taking a static snapshot from schemas not replicated.
-		"""
-		snpfile=open(self.snapshots_file, 'rb')
-		self.snapdic=yaml.load(snpfile.read())
-		snpfile.close()
+		if  os.path.isfile(obfuscation_file):
+			obfile=open(obfuscation_file, 'rb')
+			self.obfdic=yaml.load(obfile.read())
+			obfile.close()
+		else:
+			self.obfdic = {}
 		
 	def get_source_name(self, config_name = 'default'):
 		"""
@@ -458,7 +438,8 @@ class replica_engine(object):
 		self.create_schema(drop_tables=True)
 		self.copy_table_data()
 		self.create_indices()
-		self.create_views()
+		if self.global_config.obfdic != {}:
+			self.create_views()
 		self.pg_eng.set_source_id('initialised')
 		self.enable_replica()
 		self.email_alerts.send_end_init_replica()
@@ -554,7 +535,6 @@ class replica_engine(object):
 		lst_skip = [
 			'config-example',  
 			'obfuscation-example',  
-			'snapshots-example', 
 			'obfuscation'
 		]
 		list_config = (os.listdir(self.global_config.config_dir))
