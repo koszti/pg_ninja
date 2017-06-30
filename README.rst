@@ -1,55 +1,111 @@
 pg_ninja
 ##############
 
+pg_ninja is a tool for replicating and obfuscating the data from MySQL to PostgreSQL compatible with Python 2.. 
+The system use the library mysql-replication to pull the row images from MySQL which are transformed into a jsonb object. 
+A pl/pgsql function decodes the jsonb and replays the changes into the PostgreSQL database.
 
-Replica  and obfuscation from MySQL to PostgreSQL
+The tool requires an initial replica setup which pulls the data from MySQL locked in read only mode. 
+This is done by the tool running FLUSH TABLE WITH READ LOCK; .
+
+pg_ninja can pull the data from a cascading replica when the MySQL slave is configured with log-slave-updates.
 
 Current version: 0.1 DEVEL
 
+Requirements
+******************
+
+Python: CPython 2.7 on Linux
+
+MySQL: 5.5+
+
+PostgreSQL: 9.5+ with the extension pg_crypto installed.
+
+* `PyMySQL <https://pypi.python.org/pypi/PyMySQL>`_ 
+* `argparse <https://pypi.python.org/pypi/argparse>`_
+* `mysql-replication <https://pypi.python.org/pypi/mysql-replication>`_
+* `psycopg2 <https://pypi.python.org/pypi/psycopg2>`_
+* `PyYAML <https://pypi.python.org/pypi/PyYAML>`_
+* `tabulate <https://pypi.python.org/pypi/tabulate>`_
+
+Optionals for building documentation
+
+* `sphinx <http://www.sphinx-doc.org/en/stable/>`_
+* `sphinx-autobuild <https://github.com/GaretJax/sphinx-autobuild>`_
 
 
 Setup 
 **********
 
-* Download the package or git clone
-* Create a virtual environment in the main app
-* Activate the virtual environment
-* Install the required packages listed in requirements.txt 
-* Build the docs
+* clone the git repository
+* Create a virtual environment and activate it
+* Cd in the git repository main directory
+* Install the package with pip install .
 * Create a user on mysql for the replica (e.g. usr_replica)
 * Grant access to usr on the replicated database (e.g. GRANT ALL ON sakila.* TO 'usr_replica';)
 * Grant RELOAD privilege to the user (e.g. GRANT RELOAD ON \*.\* to 'usr_replica';)
 * Grant REPLICATION CLIENT privilege to the user (e.g. GRANT REPLICATION CLIENT ON \*.\* to 'usr_replica';)
 * Grant REPLICATION SLAVE privilege to the user (e.g. GRANT REPLICATION SLAVE ON \*.\* to 'usr_replica';)
-
-
-
-Requirements
-******************
-* `PyMySQL==0.7.6 <https://github.com/PyMySQL/PyMySQL>`_ 
-* `argparse==1.2.1 <https://github.com/bewest/argparse>`_
-* `mysql-replication==0.11 <https://github.com/noplay/python-mysql-replication>`_
-* `psycopg2==2.6.2 <https://github.com/psycopg/psycopg2>`_
-* `PyYAML==3.11 <https://github.com/yaml/pyyaml>`_
-* `sphinx==1.4.6 <http://www.sphinx-doc.org/en/stable/>`_
-* `sphinx-autobuild==0.6.0 <https://github.com/GaretJax/sphinx-autobuild>`_
+* Create the replica user on PostgreSQL 
+* Create a database on PostgreSQL with owner the replica user created at the step before
+* Create the pg_crypto extension on the replica database
+* Run ninja.py to create the configuration directory ~/.pg_ninja
+* cd in  ~/.pg_ninja and copy the configuration-example.yaml to another file (e.g. default.yaml)
+* Copy the obfuscation-example.yaml file to another file (e.g. obfuscation-example.yaml)
+* Setup the connection in default.yaml
+* Setup the obfuscation stragegies in obfuscation-example.yaml
+* Create the service schema with ninja.py create_schema --config default
+* Add the replica source with ninja.py add_source --config default
+* Init the replica  ninja.py init_replica--config default . Warning this will lock the mysql db in read only mode for the time required by the replica init.
+* Start  the replica with ninja.py start_replica --config default
 
 Documentation
 *****************************
-In order to build the documentation activate the virtual environment then cd into the subdirectory docs .
+In order to build the documentation, within the the virtual environment you will need sphinx.
 
-Run the command make html
-
-e.g. 
+Activate the virtual environment then run
 
 .. code-block:: none
 
-	source env/bin/activate
+	pip install sphinx
+
+
+cd in the documentation directory and run 
+
+.. code-block:: none
+
 	cd docs
 	make html
 	
 Sphinx will build the documents in the subdirectory _build/html .
 
+
+Configuration parameters
+********************************
+The system wide install is now supported correctly. 
+
+The first time ninja.py is executed creates a configuration directory in $HOME/.pg_ninja.
+Inside the directory there are two subdirectories. 
+
+* config is where the configuration files live. Use config-example.yam and obfuscation-example.yamll as templates. 
+For configuring properly the logs and pid you should either use an absolute path or provide the home alias. 
+The config-example.yaml provides the configuration for the home directory setup.
+
+* pid is where the replica pid file is created. it can be changed in the configuration file
+
+* logs is where the replica logs are saved if log_dest is file. It can be changed in the configuration file
+
+The file config-example.yaml is stored in **~/.pg_ninja/config** and should be used as template for the other configuration files. 
+The file obfuscation-example.yaml is stored in **~/.pg_ninja/config** and should be used as template for the other obfuscation files. 
+
+
+**do not use config-example.yaml or obfuscation-example.yaml** directly. 
+The files are overwritten when pg_ninja is upgraded.
+
+Is it possible to have multiple configuration files for configuring the replica from multiple source databases. 
+It's compulsory to chose different destination schemas on postgresql and to have an unique source_name.
+
+Each source requires to be started in a separate process (e.g. a cron entry).
 
 Configuration file 
 ********************************
@@ -57,7 +113,7 @@ The configuration file is a yaml file. Each parameter controls the
 way the program acts.
 
 * my_server_id the server id used by the mysql replica. 
-* copy_max_size the slice's size in rows when copying a table from MySQL to PostgreSQL
+* copy_max_memory the slice's size in rows when copying a table from MySQL to PostgreSQL during the init_replica
 * my_database mysql database to replicate. a schema with the same name will be initialised in the postgres database
 * pg_database destination database in PostgreSQL. 
 * copy_mode the allowed values are 'file'  and 'direct'. With 'file' the table is first dumped in a csv file then loaded in PostgreSQL. With 'direct' the copy happens in memory. 
@@ -73,13 +129,16 @@ way the program acts.
 * obfuscation_file path to the obfuscation file 
 * schema_clear the schema with the full replica with data in clear
 * schema_obf the schema with the tables with the obfuscated fields listed in the obfuscation file. the tables not listed are exposed as views selecting from the schema in clear.
-* copy_override list of tables to override the slice size when copying the table. Useful to deal with tables with large row size.
-.. code-block:: yaml
-   
-   
-   copy_override: 
-    foo: 1000
-    bar: 7000
+* replica_batch_size: 1000
+* reply_batch_size: 1000
+* source_name: 'default'
+* sleep_loop: 5
+* batch_retention: '7 days'
+* obfuscation_file
+* skip_view skip view drop and creation in obfuscated schema
+* out_dir: '/tmp/'
+* log_days_keep: 10
+
 
     
 
@@ -104,19 +163,36 @@ PostgreSQL connection parameters
         user: replication_username
         password: never_commit_passwords
 
+	
+pg_ninja can send emails under certain circumstances (end of init_replica, end of sync_obfuscation).
+The smtp configuration is done in the email_config parameter. It's also possible to use tls or 
+authenticate against the smtp server.
+  
+ 
+.. code-block:: yaml
+
+        email_config: 
+                subj_prefix: 'PGNINJA'
+                smtp_login: Yes
+                smtp_server: 'smtp.foo.bar'
+                smtp_port: 587
+                email_from: pgobfuscator@foo.bar
+                smtp_username: login@foo.bar
+                smtp_password: never_commit_passwords
+                smtp_tls: Yes
+                email_rcpt:
+                       - alert@foo.bar
+
 
 Obfuscation
 **********************
-The obfuscation file is a simple yaml file listing the table and the fields with the different obfuscation strategy.
+The obfuscation file is a simple yaml file where the table and the fields requiring obfuscation are listed.
 
+There are 
 the mode normal can hash the entire field or keep an arbitrary number of characters not obfuscated (useful for 
 running joins).
 
-Please note that PostgreSQL should have the extension pg_crypto installed before running the initial copy.
-
-The mode date applies to the timestamps and sets the date to the first of january preserving only the year.
-
-The mode numeric resets the value to 0.
+The obfuscation strategies are explained below.
 
 .. code-block:: yaml
 
@@ -148,9 +224,14 @@ The mode numeric resets the value to 0.
 	    numeric_field:
 		mode: numeric
 
+	# obfuscate the field nullable_field changing the value to NULL
+	example_05:
+		nullable_field:
+			mode: setnull
+		
 Usage
 **********************
-The script ninja.py have a very basic command line interface. Accepts three commands
+The script ninja.py have a basic command line interface.
 
 * drop_schema Drops the schema sch_chameleon with cascade option
 * create_schema Create the schema sch_chameleon
@@ -264,8 +345,8 @@ Initialise the schema and the replica with
 
 .. code-block:: none
     
-    ./pg_chameleon.py create_schema
-    ./pg_chameleon.py init_replica
+    ./pg_ninja.py create_schema
+    ./pg_ninja.py init_replica
 
 
 Start the replica with
@@ -273,7 +354,7 @@ Start the replica with
 
 .. code-block:: none
     
-    ./pg_chameleon.py start_replica
+    ./pg_ninja.py start_replica
 	
 
 Platform and versions
