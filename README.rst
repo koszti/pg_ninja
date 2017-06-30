@@ -1,6 +1,18 @@
 pg_ninja
 ##############
 
+.. image:: https://img.shields.io/github/issues/transferwise/pg_ninja.svg   
+  :target: https://github.com/transferwise/pg_ninja/issues
+	
+.. image:: https://img.shields.io/github/forks/transferwise/pg_ninja.svg   
+  :target: https://github.com/transferwise/pg_ninja/network
+
+.. image:: https://img.shields.io/github/stars/transferwise/pg_ninja.svg   
+  :target: https://github.com/transferwise/pg_ninja/stargazers
+  
+.. image:: https://img.shields.io/badge/license-Apache%202-blue.svg   
+  :target: https://raw.githubusercontent.com/transferwise/pg_ninja/master/LICENSE
+  
 pg_ninja is a tool for replicating and obfuscating the data from MySQL to PostgreSQL compatible with Python 2.. 
 The system use the library mysql-replication to pull the row images from MySQL which are transformed into a jsonb object. 
 A pl/pgsql function decodes the jsonb and replays the changes into the PostgreSQL database.
