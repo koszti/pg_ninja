@@ -233,13 +233,24 @@ Usage
 **********************
 The script ninja.py have a basic command line interface.
 
+
+
 * drop_schema Drops the schema sch_chameleon with cascade option
 * create_schema Create the schema sch_chameleon
 * upgrade_schema Upgrade an existing schema sch_chameleon
 * init_replica Creates the table structure and copy the data from mysql locking the tables in read only mode. It saves the master status in sch_chameleon.t_replica_batch.
 * start_replica Starts the replication from mysql to PostgreSQL using the master data stored in sch_chameleon.t_replica_batch and update the master position every time an new batch is processed.
+* sync_obfuscation synchronise the obfuscated tables with the schema in clear
+* add_table add a table to a running replica
+* add_source add a replica source to the replica catalogue
+* drop_source remove a source from the replica catalogue
+* list_config list the available configurations
+* show_status show the status of all registered sources with the replica lag
+* stop_replica stops a running replica
+* disable_replica stops  a running replica and prevents the replica to start again
+* enable_replica enables the replica start
 
-After running init_schema and init_replica start replica will initiate the mysql to PostgreSQL replication.
+
 
 Example
 **********************
@@ -258,7 +269,7 @@ In MySQL create a user for the replica.
     
 Add the configuration for the replica to my.cnf (requires mysql restart)
 
-.. code-block:: none
+.. code-block:: ini
     
     binlog_format= ROW
     log-bin = mysql-bin
@@ -275,9 +286,9 @@ Check you can connect to both databases from the replication system.
 
 For MySQL
 
-.. code-block:: none 
+.. code-block:: bash
 
-    mysql -p -h derpy -u usr_replica sakila 
+    mysql -p -h hostreplica -u usr_replica sakila 
     Enter password: 
     Reading table information for completion of table and column names
     You can turn off this feature to get a quicker startup with -A
@@ -298,15 +309,15 @@ For MySQL
     
 For PostgreSQL
 
-.. code-block:: none
+.. code-block:: bash
 
-    psql  -h derpy -U usr_replica db_replica
+    psql  -h hostreplica -U usr_replica db_replica
     Password for user usr_replica: 
     psql (9.5.4)
     Type "help" for help.
     db_replica=> 
 
-Setup the connection parameters in config.yaml
+Setup the connection parameters in default.yaml
 
 .. code-block:: yaml
 
@@ -343,47 +354,19 @@ Setup the connection parameters in config.yaml
 Initialise the schema and the replica with
 
 
-.. code-block:: none
+.. code-block:: bash
     
-    ./pg_ninja.py create_schema
-    ./pg_ninja.py init_replica
+    ninja.py create_schema --config default
+    ninja.py add_source --config default
+    ninja.py init_replica --config default
 
 
 Start the replica with
 
+.. code-block:: bash
 
-.. code-block:: none
-    
-    ./pg_ninja.py start_replica
+    ninja.py start_replica  --config default
 	
 
-Platform and versions
-****************************
-
-The library is being developed on Ubuntu 14.04 with python 2.7.6.
-
-The databases source and target are:
-
-* MySQL: 5.6 on Ubuntu Server  14.04
-* PostgreSQL: 9.5 on Ubuntu Server  14.04
-  
-  
-
-What does work
-..............................
-* Read the schema specifications from MySQL and replicate the same structure into PostgreSQL
-* Locks the tables in mysql and gets the master coordinates
-* Create primary keys and indices on PostgreSQL
-* Replay and obfuscate of the replicated data in PostgreSQL
-* Basic DDL Support (CREATE/DROP/ALTER TABLE, DROP PRIMARY KEY)
-* Enum support
-* Blob import into bytea 
-* Read replica from MySQL
-* Copy the data from MySQL to PostgreSQL on the fly
-* Discards of rubbish data (logged to the process log)
- 
-What doesn't work
-..............................
-* Full DDL replica 
 
 
