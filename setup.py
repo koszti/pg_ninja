@@ -44,7 +44,7 @@ data_files.append(sql_up_files)
 
 setup(
 	name="pg_ninja",
-	version="v1.0-alpha1",
+	version="v1.0-alpha2",
 	description="MySQL to PostgreSQL replica and obfuscation",
 	long_description="""pg_ninja is a tool for replicating and obfuscating the data in real time from MySQL to PostgreSQL, compatible with Python 2.7.
 The system use the library mysql-replication to pull the row images from MySQL which are transformed into a jsonb object. 
