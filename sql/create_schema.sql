@@ -2,7 +2,7 @@
 CREATE SCHEMA IF NOT EXISTS sch_ninja;
 CREATE OR REPLACE VIEW sch_ninja.v_version 
  AS
-	SELECT '0.11'::TEXT t_version
+	SELECT '0.12'::TEXT t_version
 ;
 
 CREATE TABLE sch_ninja.t_discarded_rows
@@ -27,6 +27,7 @@ CREATE TABLE sch_ninja.t_sources
 	t_obf_schema	  text NOT NULL,
 	enm_status sch_ninja.en_src_status NOT NULL DEFAULT 'ready',
 	ts_last_event timestamp without time zone,
+	v_log_table character varying[],
 	CONSTRAINT pk_t_sources PRIMARY KEY (i_id_source)
 )
 ;
@@ -90,7 +91,6 @@ CREATE TABLE sch_ninja.t_replica_batch
   ts_created timestamp without time zone NOT NULL DEFAULT clock_timestamp(),
   ts_processed timestamp without time zone ,
   ts_replayed timestamp without time zone ,
-  v_log_table character varying(100) NOT NULL,
   i_replayed bigint NULL,
   i_skipped bigint NULL,
   i_ddl bigint NULL,
@@ -129,26 +129,6 @@ WITH (
   OIDS=FALSE
 );
 
-CREATE TABLE IF NOT EXISTS sch_ninja.t_log_replica_1 
-(
-CONSTRAINT pk_log_replica_1 PRIMARY KEY (i_id_event),
-  CONSTRAINT fk_replica_batch_1 FOREIGN KEY (i_id_batch) 
-	REFERENCES  sch_ninja.t_replica_batch (i_id_batch)
-	ON UPDATE RESTRICT ON DELETE CASCADE
-)
-INHERITS (sch_ninja.t_log_replica)
-;
-
-CREATE TABLE IF NOT EXISTS sch_ninja.t_log_replica_2
-(
-CONSTRAINT pk_log_replica_2 PRIMARY KEY (i_id_event),
-  CONSTRAINT fk_replica_batch_2 FOREIGN KEY (i_id_batch) 
-	REFERENCES  sch_ninja.t_replica_batch (i_id_batch)
-	ON UPDATE RESTRICT ON DELETE CASCADE
-)
-INHERITS (sch_ninja.t_log_replica)
-;
-
 CREATE TABLE sch_ninja.t_replica_tables
 (
   i_id_table bigserial NOT NULL,
@@ -178,6 +158,37 @@ ALTER TABLE sch_ninja.t_replica_tables
 	ON UPDATE RESTRICT ON DELETE CASCADE
 	;
 
+	
+CREATE OR REPLACE FUNCTION sch_ninja.fn_refresh_parts() 
+RETURNS VOID as 
+$BODY$
+DECLARE
+    t_sql text;
+    r_tables record;
+BEGIN
+    FOR r_tables IN SELECT unnest(v_log_table) as v_log_table FROM sch_ninja.t_sources
+    LOOP
+        RAISE DEBUG 'CREATING TABLE %', r_tables.v_log_table;
+        t_sql:=format('
+                        CREATE TABLE IF NOT EXISTS sch_ninja.%I
+                        (
+                        CONSTRAINT pk_%s PRIMARY KEY (i_id_event),
+                          CONSTRAINT fk_%s FOREIGN KEY (i_id_batch) 
+                        	REFERENCES  sch_ninja.t_replica_batch (i_id_batch)
+                    	ON UPDATE RESTRICT ON DELETE CASCADE
+                        )
+                        INHERITS (sch_ninja.t_log_replica)
+                        ;',
+                        r_tables.v_log_table,
+                        r_tables.v_log_table,
+                        r_tables.v_log_table
+                );
+        EXECUTE t_sql;
+    END LOOP;
+END
+$BODY$
+LANGUAGE plpgsql 
+;
 
 CREATE OR REPLACE FUNCTION sch_ninja.fn_process_batch(integer,integer)
 RETURNS BOOLEAN AS
