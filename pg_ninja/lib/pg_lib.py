@@ -1548,6 +1548,13 @@ class pg_engine:
 			self.pg_conn.pgsql_cur.execute(create_stat[0])
 	
 	def add_source(self, source_name, schema_clear, schema_obf):
+		"""
+			The method add a new source in the replica catalogue. 
+			If the source name is already present an error message is emitted without further actions.
+			:param source_name: The source name stored in the configuration parameter source_name.
+			:param schema_clear: The schema with the data in clear.
+			:param schema_obf: The schema with the data obfuscated.
+		"""
 		sql_source = """
 					SELECT 
 						count(i_id_source)
@@ -1561,18 +1568,55 @@ class pg_engine:
 		source_data = self.pg_conn.pgsql_cur.fetchone()
 		cnt_source = source_data[0]
 		if cnt_source == 0:
-			sql_add = """INSERT INTO sch_ninja.t_sources 
-						( t_source,t_dest_schema,t_obf_schema) 
-					VALUES 
-						(%s,%s,%s); """
+			sql_add = """
+				INSERT INTO sch_ninja.t_sources 
+					( 
+						t_source,
+						t_dest_schema,
+						t_obf_schema
+					) 
+				VALUES 
+					(
+						%s,
+						%s,
+						%s
+					)
+				RETURNING 
+					i_id_source
+			; """
 			self.pg_conn.pgsql_cur.execute(sql_add, (source_name, schema_clear, schema_obf ))
+			source_add = self.pg_conn.pgsql_cur.fetchone()
+			sql_update = """
+				UPDATE sch_ninja.t_sources
+					SET v_log_table=ARRAY[
+						't_log_replica_1_src_%s',
+						't_log_replica_2_src_%s'
+					]
+				WHERE i_id_source=%s
+				;
+			"""
+			self.pg_conn.pgsql_cur.execute(sql_update,  (source_add[0],source_add[0], source_add[0] ))
+			
+			sql_parts = """SELECT sch_ninja.fn_refresh_parts() ;"""
+			self.pg_conn.pgsql_cur.execute(sql_parts)
 		else:
 			print("Source %s already registered." % source_name)
 		sys.exit()
+		
 	def drop_source(self, source_name):
+		"""
+			Drops the source from the replication catalogue discarding any replica reference.
+			:param source_name: The source name stored in the configuration parameter source_name.
+		"""
 		sql_delete = """ DELETE FROM sch_ninja.t_sources 
-					WHERE  t_source=%s; """
+					WHERE  t_source=%s
+					RETURNING v_log_table
+					; """
 		self.pg_conn.pgsql_cur.execute(sql_delete, (source_name, ))
+		source_drop = self.pg_conn.pgsql_cur.fetchone()
+		for log_table in source_drop[0]:
+			sql_drop = """DROP TABLE sch_ninja."%s"; """ % (log_table)
+			self.pg_conn.pgsql_cur.execute(sql_drop)
 	
 	def get_source_status(self, source_name):
 		sql_source = """
