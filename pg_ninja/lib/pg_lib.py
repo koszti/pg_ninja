@@ -647,31 +647,98 @@ class pg_engine:
 		self.pg_conn.pgsql_cur.execute(sql_schema)
 		self.pg_conn.pgsql_cur.execute(sql_path)
 	
+		
 	def store_table(self, table_name):
+		"""
+			The method saves the table name along with the primary key definition in the table t_replica_tables.
+			This is required in order to let the replay procedure which primary key to use replaying the update and delete.
+			If the table is without primary key is not stored. 
+			A table without primary key is copied and the indices are create like any other table. 
+			However the replica doesn't work for the tables without primary key.
+			
+			If the class variable master status is set then the master's coordinates are saved along with the table.
+			This happens in general when a table is added to the replica or the data is refreshed with sync_tables.
+			
+			
+			:param table_name: the table name to store in the table  t_replica_tables
+		"""
+		if self.master_status:
+			master_data = self.master_status[0]
+			binlog_file = master_data["File"]
+			binlog_pos = master_data["Position"]
+		else:
+			binlog_file = None
+			binlog_pos = None
 		table_data=self.table_metadata[table_name]
+		table_no_pk = True
 		for index in table_data["indices"]:
 			if index["index_name"]=="PRIMARY":
-				sql_insert=""" INSERT INTO sch_ninja.t_replica_tables 
-										(
-											i_id_source,
-											v_table_name,
-											v_schema_name,
-											v_table_pkey
-										)
-										VALUES (
-														%s,
-														%s,
-														%s,
-														ARRAY[%s]
-													)
-										ON CONFLICT (i_id_source,v_table_name,v_schema_name)
-											DO UPDATE 
-												SET v_table_pkey=EXCLUDED.v_table_pkey
+				table_no_pk = False
+				sql_insert=""" 
+					INSERT INTO sch_ninja.t_replica_tables 
+						(
+							i_id_source,
+							v_table_name,
+							v_schema_name,
+							v_table_pkey,
+							t_binlog_name,
+							i_binlog_position
+						)
+					VALUES 
+						(
+							%s,
+							%s,
+							%s,
+							ARRAY[%s],
+							%s,
+							%s
+						)
+					ON CONFLICT (i_id_source,v_table_name,v_schema_name)
+						DO UPDATE 
+							SET 
+								v_table_pkey=EXCLUDED.v_table_pkey,
+								t_binlog_name = EXCLUDED.t_binlog_name,
+								i_binlog_position = EXCLUDED.i_binlog_position
 										;
 								"""
-				self.pg_conn.pgsql_cur.execute(sql_insert, (self.i_id_source, table_name, self.dest_schema, index["index_columns"].strip()))	
-				self.pg_conn.pgsql_cur.execute(sql_insert, (self.i_id_source, table_name, self.obf_schema, index["index_columns"].strip()))	
-	
+				self.pg_conn.pgsql_cur.execute(sql_insert, (
+					self.i_id_source, 
+					table_name, 
+					self.dest_schema, 
+					index["index_columns"].strip(), 
+					binlog_file, 
+					binlog_pos
+					)
+				)
+				self.pg_conn.pgsql_cur.execute(sql_insert, (
+					self.i_id_source, 
+					table_name, 
+					self.obf_schema, 
+					index["index_columns"].strip(), 
+					binlog_file, 
+					binlog_pos
+					)
+				)
+		if table_no_pk:
+			sql_delete = """
+				DELETE FROM sch_ninja.t_replica_tables
+				WHERE
+						i_id_source=%s
+					AND	v_table_name=%s
+					AND	v_schema_name=%s
+				;
+			"""
+			self.pg_conn.pgsql_cur.execute(sql_delete, (
+				self.i_id_source, 
+				table_name, 
+				self.dest_schema)
+				)
+			self.pg_conn.pgsql_cur.execute(sql_delete, (
+				self.i_id_source, 
+				table_name, 
+				self.obf_schema)
+				)
+
 		
 	
 	def unregister_table(self, table_name):
