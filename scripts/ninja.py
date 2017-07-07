@@ -12,7 +12,7 @@ commands = [
 	'upgrade_schema',
 	'drop_schema', 
 	'sync_obfuscation', 
-	'add_table', 
+	'sync_tables', 
 	'add_source', 
 	'drop_source', 
 	'list_config', 
@@ -24,19 +24,22 @@ commands = [
 command_help = 'Available commands, ' + ','.join(commands)
 
 
-table_help =  'Specify the table\'s name to add to the existing replica. Multiple tables can be specified separated by comma. ' 
-clean_help = 'Cleans the index definitions before the re-sync. Use with caution.'
+table_help =  """Specifies the table's name to sync. It's possible to specify multiple table names separated by comma. If the parameter is omitted all tables will be syncronised."""
+clean_help = """Cleans the index definitions before the re-sync. Use with caution."""
+debug_help = """Enables the debug mode with log on stdout and in debug verbosity, whether the config file says. """
 
 parser = argparse.ArgumentParser(description='Command line for pg_ninja.',  add_help=True)
 parser.add_argument('command', metavar='command', type=str, help=command_help)
 parser.add_argument('--config', metavar='config', type=str,  default='default',  required=False)
 parser.add_argument('--table', metavar='table', type=str,  default='*',  required=False, help=table_help)
 parser.add_argument('--clean', default=False, required=False, help=clean_help, action='store_true')
+parser.add_argument('--debug',  default=False,  required=False, help=debug_help,  action='store_true')
+
 
 args = parser.parse_args()
 
 if args.command in commands:
-	replica = replica_engine(args.config)
+	replica = replica_engine(args.config,args.debug)
 	if args.command == commands[0]:
 		replica.create_service_schema()
 	elif args.command == commands[1]:
@@ -50,7 +53,7 @@ if args.command in commands:
 	elif args.command == commands[5]:
 		replica.sync_obfuscation(True, args.table, args.clean)
 	elif args.command == commands[6]:
-		replica.add_table(args.table)
+		replica.sync_tables(args.table)
 	elif args.command == commands[7]:
 		replica.add_source()
 	elif args.command == commands[8]:

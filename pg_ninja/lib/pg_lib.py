@@ -100,7 +100,7 @@ class pg_engine:
 		self.type_ddl={}
 		self.pg_charset=self.pg_conn.pg_charset
 		self.batch_retention = global_config.batch_retention
-		self.cat_version='0.12'
+		self.cat_version='0.13'
 		self.cat_sql=[
 			{'version':'base','script': 'create_schema.sql'}, 
 			{'version':'0.8','script': 'upgrade/cat_0.8.sql'}, 
@@ -108,6 +108,7 @@ class pg_engine:
 			{'version':'0.10','script': 'upgrade/cat_0.10.sql'}, 
 			{'version':'0.11','script': 'upgrade/cat_0.11.sql'}, 
 			{'version':'0.12','script': 'upgrade/cat_0.12.sql'}, 
+			{'version':'0.13','script': 'upgrade/cat_0.13.sql'}, 
 			
 		]
 		cat_version=self.get_schema_version()
@@ -115,6 +116,8 @@ class pg_engine:
 		if cat_version!=self.cat_version and int(num_schema)>0:
 			self.upgrade_service_schema()
 		self.table_limit = ['*']
+		self.master_status = None
+		
 	
 	
 	def drop_obf_rel(self, relname, type):
@@ -776,9 +779,20 @@ class pg_engine:
 				self.logger.error(" - > Insert values: %s" % (column_values) )
 				
 	def build_tab_ddl(self):
-		""" the function iterates over the list l_tables and builds a new list with the statements for tables"""
+		""" 
+			The method iterates over the list l_tables and builds a new list with the statements for tables
+		"""
+		if self.table_limit[0] != '*' :
+			table_metadata = {}
+			for tab in self.table_limit:
+				try:
+					table_metadata[tab] = self.table_metadata[tab]
+				except:
+					pass
+		else:
+			table_metadata = self.table_metadata
 		
-		for table_name in self.table_metadata:
+		for table_name in table_metadata:
 			table=self.table_metadata[table_name]
 			columns=table["columns"]
 			
@@ -809,7 +823,23 @@ class pg_engine:
 			def_columns=str(',').join(ddl_columns)
 			self.type_ddl[table["name"]]=ddl_enum
 			self.table_ddl[table["name"]]=ddl_head+def_columns+ddl_tail
-		
+
+	def drop_tables(self):
+		"""
+			The method drops the tables present in the table_ddl
+		"""
+		self.set_search_path()
+		for table in self.table_ddl:
+			self.logger.debug("dropping table %s " % (table, ))
+			sql_drop = """DROP TABLE IF EXISTS "%s"  CASCADE;""" % (table, )
+			self.pg_conn.pgsql_cur.execute(sql_drop)
+	
+	def set_search_path(self):
+		"""
+			The method sets the search path for the connection.
+		"""
+		sql_path=" SET search_path=%s;" % (self.dest_schema, )
+		self.pg_conn.pgsql_cur.execute(sql_path)
 	
 	def build_idx_ddl(self, obfdic={}):
 		table_obf=[table for table in obfdic]

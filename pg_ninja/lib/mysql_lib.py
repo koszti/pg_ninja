@@ -661,6 +661,28 @@ class mysql_engine:
 			current_slice=current_slice+1
 	
 	def copy_table_data(self, pg_engine,  copy_max_memory,  copy_obfuscated=True,  lock_tables=True):
+		"""
+			copy the table data from mysql to postgres
+			param pg_engine: The postgresql engine required to write into the postgres database.
+			The process determines the estimated optimal slice size using copy_max_memory and avg_row_length 
+			from MySQL's information_schema.TABLES. If the table contains no rows then the slice size is set to a
+			reasonable high value (100,000) in order to get the table copied in one slice. The estimated numer of slices is determined using the 
+			slice size.
+			Then generate_select is used to build the csv and insert columns for the table.
+			An unbuffered cursor is used to pull the data from MySQL using the CSV format. The fetchmany with copy_limit (slice size) is called
+			to pull out the rows into a file object. 
+			The copy_mode determines wheter to use a file (out_file) or an in memory file object (io.StringIO()).
+			If there no more rows the loop exits, otherwise continue to the next slice. When the slice is saved the method pg_engine.copy_data is
+			executed to load the data into the PostgreSQL table.
+			If some error occurs the slice number is saved into the list slice_insert and after all the slices are copied the fallback procedure insert_table_data
+			process the remaining slices using the inserts.
+			
+			:param pg_engine: the postgresql engine
+			:param copy_max_memory: The estimated maximum amount of memory to use in a single slice copy
+			:param copy_obfuscated: The estimated maximum amount of memory to use in a single slice copy
+			:param lock_tables: Specifies whether the tables should be locked before copying the data
+			
+		"""
 		out_file='%s/output_copy.csv' % self.out_dir
 		self.logger.info("locking the tables")
 		if lock_tables:
@@ -769,7 +791,11 @@ class mysql_engine:
 		self.master_status=self.mysql_con.my_cursor.fetchall()		
 		
 	def lock_tables(self):
-		""" lock tables and get the log coords """
+		""" 
+			The method locks the tables using FLUSH TABLES WITH READ LOCK. The 
+			tables locked are limited to the tables found by get_table_metadata.
+			After locking the tables the metod gets the master's coordinates with get_master_status.
+		"""
 		self.locked_tables=[]
 		for table_name in self.my_tables:
 			table=self.my_tables[table_name]
