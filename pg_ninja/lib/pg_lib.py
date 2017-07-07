@@ -1821,7 +1821,7 @@ class pg_engine:
 				t_binlog_name,
 				i_binlog_position
 			FROM
-				sch_chameleon.t_replica_tables
+				sch_ninja.t_replica_tables
 			WHERE
 				t_binlog_name IS NOT NULL
 				AND i_binlog_position IS NOT NULL
