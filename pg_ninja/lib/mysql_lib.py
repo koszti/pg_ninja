@@ -154,8 +154,6 @@ class mysql_engine:
 		"""
 		table_type_map=self.get_table_type_map()	
 		inc_tables = pg_engine.get_inconsistent_tables()
-		print(inc_tables)
-		sys.exit()
 		close_batch=False
 		total_events=0
 		master_data={}

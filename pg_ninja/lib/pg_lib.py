@@ -1839,3 +1839,24 @@ class pg_engine:
 			tab_dic["log_pos"]  = int(table[3])
 			inc_dic[table[1]] = tab_dic
 		return inc_dic
+		
+	def set_consistent_table(self, table):
+		"""
+			The method set to NULL the  binlog name and position for the given table.
+			When the table is marked consistent the read replica loop reads and saves the table's row images.
+			
+			:param table: the table name
+		"""
+		sql_set = """
+			UPDATE sch_ninja.t_replica_tables
+				SET 
+					t_binlog_name = NULL,
+					i_binlog_position = NULL
+			WHERE
+					i_id_source = %s
+				AND	v_table_name = %s
+				AND	v_schema_name = %s
+			;
+		"""
+		self.pg_conn.pgsql_cur.execute(sql_set, (self.i_id_source, table, self.dest_schema))
+		self.pg_conn.pgsql_cur.execute(sql_set, (self.i_id_source, table, self.sch_obf))
