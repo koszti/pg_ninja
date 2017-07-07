@@ -1804,3 +1804,38 @@ class pg_engine:
 		tables_pk = self.pg_conn.pgsql_cur.fetchall()
 		return tables_pk
 		
+	def get_inconsistent_tables(self):
+		"""
+			The method collects the tables in not consistent state.
+			The informations are stored in a dictionary which key is the table's name.
+			The dictionary is used in the read replica loop to determine wheter the table's modifications
+			should be ignored because in not consistent state.
+			
+			:return: a dictionary with the tables in inconsistent state and their snapshot coordinates.
+			:rtype: dictionary
+		"""
+		sql_get = """
+			SELECT
+				v_schema_name,				
+				v_table_name,
+				t_binlog_name,
+				i_binlog_position
+			FROM
+				sch_chameleon.t_replica_tables
+			WHERE
+				t_binlog_name IS NOT NULL
+				AND i_binlog_position IS NOT NULL
+				AND i_id_source = %s
+		;
+		"""
+		inc_dic = {}
+		self.pg_conn.pgsql_cur.execute(sql_get, (self.i_id_source, ))
+		inc_results = self.pg_conn.pgsql_cur.fetchall()
+		for table  in inc_results:
+			tab_dic = {}
+			tab_dic["schema"]  = table[0]
+			tab_dic["table"]  = table[1]
+			tab_dic["log_seq"]  = int(table[2].split('.')[1])
+			tab_dic["log_pos"]  = int(table[3])
+			inc_dic[table[1]] = tab_dic
+		return inc_dic

@@ -153,6 +153,7 @@ class mysql_engine:
 	
 		"""
 		table_type_map=self.get_table_type_map()	
+		inc_tables = pg_engine.get_inconsistent_tables()
 		close_batch=False
 		total_events=0
 		master_data={}
@@ -212,18 +213,23 @@ class mysql_engine:
 					self.sql_token.parse_sql(binlogevent.query)
 					
 					for token in self.sql_token.tokenised:
-						if len(token)>0:
-							self.logger.debug("CAPTURED QUERY- binlogfile %s, position %s. Lenght group insert: %s \n Query: %s " % (binlogfile, binlogevent.packet.log_pos, grp_length, binlogevent.query))
-							self.logger.debug("""TOKEN: %s """ % (token, ))
-							query_data={
-										"binlog":log_file, 
-										"logpos":log_position, 
-										"schema": self.schema_clear, 
-										"batch_id":id_batch, 
-										"log_table":log_table
-							}
-							pg_engine.write_ddl(token, query_data, [table for table in self.obfdic])
-							close_batch=True
+						write_ddl = True
+						if token["name"] in inc_tables:
+							write_ddl = False
+						if write_ddl:
+							event_time = binlogevent.timestamp
+							if len(token)>0:
+								self.logger.debug("CAPTURED QUERY- binlogfile %s, position %s. Lenght group insert: %s \n Query: %s " % (binlogfile, binlogevent.packet.log_pos, grp_length, binlogevent.query))
+								self.logger.debug("""TOKEN: %s """ % (token, ))
+								query_data={
+											"binlog":log_file, 
+											"logpos":log_position, 
+											"schema": self.schema_clear, 
+											"batch_id":id_batch, 
+											"log_table":log_table
+								}
+								pg_engine.write_ddl(token, query_data, [table for table in self.obfdic])
+								close_batch=True
 						
 					self.sql_token.reset_lists()
 					if close_batch:
@@ -233,11 +239,23 @@ class mysql_engine:
 			else:
 				
 				for row in binlogevent.rows:
+					add_row = True
 					log_file=binlogfile
 					log_position=binlogevent.packet.log_pos
 					table_name=binlogevent.table
+					event_time=binlogevent.timestamp
 					column_map=table_type_map[table_name]
-
+					if table_name in inc_tables:
+						log_seq = int(log_file.split('.')[1])
+						log_pos = int(log_position)
+						table_dic = inc_tables[table_name]
+						if log_seq >= table_dic["log_seq"] and log_pos >= table_dic["log_pos"]:
+							add_row = True
+							self.logger.debug("CONSISTENT POINT FOR TABLE REACHED %s - binlogfile %s, position %s" % (table_name, binlogfile, log_position))
+							pg_engine.set_consistent_table(table_name)
+							inc_tables = pg_engine.get_inconsistent_tables()
+						else:
+							add_row = False
 
 					global_data={
 										"binlog":log_file,
@@ -250,54 +268,55 @@ class mysql_engine:
 					event_data={}
 					event_update={}
 					event_data_obf={}
-					if isinstance(binlogevent, DeleteRowsEvent):
-						global_data["action"] = "delete"
-						event_values=row["values"]
-					elif isinstance(binlogevent, UpdateRowsEvent):
-						global_data["action"] = "update"
-						event_values=row["after_values"]
-						event_update=row["before_values"]
-					elif isinstance(binlogevent, WriteRowsEvent):
-						global_data["action"] = "insert"
-						event_values=row["values"]
-					global_obf=dict(global_data.items())
-					global_obf["schema"]=self.schema_obf
-					for column_name in event_values:
-						column_data_type=column_map[column_name]
-						column_type=column_data_type["data_type"]
-						if column_type in self.hexify and event_values[column_name]:
-							event_values[column_name]=binascii.hexlify(event_values[column_name])
-					for column_name in event_update:
-						column_data_type=column_map[column_name]
-						column_type=column_data_type["data_type"]
-						if column_type in self.hexify and event_update[column_name]:
-							event_update[column_name]=binascii.hexlify(event_update[column_name])
-						elif column_type in self.hexify and isinstance(event_update[column_name], bytes):
-							event_update[column_name] = ''
+					if add_row:
+						if isinstance(binlogevent, DeleteRowsEvent):
+							global_data["action"] = "delete"
+							event_values=row["values"]
+						elif isinstance(binlogevent, UpdateRowsEvent):
+							global_data["action"] = "update"
+							event_values=row["after_values"]
+							event_update=row["before_values"]
+						elif isinstance(binlogevent, WriteRowsEvent):
+							global_data["action"] = "insert"
+							event_values=row["values"]
+						global_obf=dict(global_data.items())
+						global_obf["schema"]=self.schema_obf
+						for column_name in event_values:
+							column_data_type=column_map[column_name]
+							column_type=column_data_type["data_type"]
+							if column_type in self.hexify and event_values[column_name]:
+								event_values[column_name]=binascii.hexlify(event_values[column_name])
+						for column_name in event_update:
+							column_data_type=column_map[column_name]
+							column_type=column_data_type["data_type"]
+							if column_type in self.hexify and event_update[column_name]:
+								event_update[column_name]=binascii.hexlify(event_update[column_name])
+							elif column_type in self.hexify and isinstance(event_update[column_name], bytes):
+								event_update[column_name] = ''
 
-					try:
-						obf_list=self.obfdic[table_name]
-						event_values_obf=dict(event_values.items())
-					except:
-						obf_list=None
-						event_values_obf=None
-
-					if obf_list:
 						try:
-							for column_name in obf_list:
-								obf_mode=obf_list[column_name]
-								event_values_obf[column_name]=self.obfuscate_value(event_values_obf[column_name], obf_mode, column_data_type)
+							obf_list=self.obfdic[table_name]
+							event_values_obf=dict(event_values.items())
 						except:
-							self.logger.error("discarded row in obfuscation process.\n global_data:%s \n event_data:%s \n" % (global_data,event_values ))
+							obf_list=None
+							event_values_obf=None
 
-					event_data = dict(event_data.items() +event_values.items())
-					event_insert={"global_data":global_data,"event_data":event_data,  "event_update":event_update}
-					group_insert.append(event_insert)
+						if obf_list:
+							try:
+								for column_name in obf_list:
+									obf_mode=obf_list[column_name]
+									event_values_obf[column_name]=self.obfuscate_value(event_values_obf[column_name], obf_mode, column_data_type)
+							except:
+								self.logger.error("discarded row in obfuscation process.\n global_data:%s \n event_data:%s \n" % (global_data,event_values ))
 
-					if event_values_obf:
-						event_data_obf = dict(event_data_obf.items() +event_values_obf.items())
-						event_obf={"global_data":global_obf,"event_data":event_data_obf ,  "event_update":event_update}
-						group_insert.append(event_obf)
+						event_data = dict(event_data.items() +event_values.items())
+						event_insert={"global_data":global_data,"event_data":event_data,  "event_update":event_update}
+						group_insert.append(event_insert)
+
+						if event_values_obf:
+							event_data_obf = dict(event_data_obf.items() +event_values_obf.items())
+							event_obf={"global_data":global_obf,"event_data":event_data_obf ,  "event_update":event_update}
+							group_insert.append(event_obf)
 
 
 					master_data["File"]=log_file
