@@ -246,6 +246,7 @@ class mysql_engine:
 					event_time=binlogevent.timestamp
 					column_map=table_type_map[table_name]
 					if table_name in inc_tables:
+						table_consistent = False
 						log_seq = int(log_file.split('.')[1])
 						log_pos = int(log_position)
 						table_dic = inc_tables[table_name]

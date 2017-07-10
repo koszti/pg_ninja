@@ -463,12 +463,15 @@ class replica_engine(object):
 			self.pg_eng.set_source_id('initialising')
 			self.stop_replica(allow_restart=False)
 			self.pg_eng.build_tab_ddl()
+			self.pg_eng.build_idx_ddl(self.global_config.obfdic)
 			self.pg_eng.drop_tables()
 			self.pg_eng.create_tables()
 			self.my_eng.copy_table_data(self.pg_eng,  self.global_config.copy_max_memory, False, False)
-			self.pg_eng.create_indices()
 			self.pg_eng.set_source_id('initialised')
 			self.my_eng.unlock_tables()
+			if self.global_config.obfdic != {}:
+				self.pg_eng.sync_obfuscation(self.global_config.obfdic)
+			self.pg_eng.create_indices()
 			self.enable_replica()
 		else:
 			print("You should specify at least one table to synchronise.")
