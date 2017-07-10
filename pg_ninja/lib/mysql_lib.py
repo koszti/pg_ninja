@@ -369,7 +369,7 @@ class mysql_engine:
 					pg_engine.set_batch_processed(id_batch)
 					self.id_batch=None
 		self.logger.debug("replaying batch.")
-		pg_engine.process_batch(self.reply_batch_size)
+		#pg_engine.process_batch(self.reply_batch_size)
 		
 
 	
