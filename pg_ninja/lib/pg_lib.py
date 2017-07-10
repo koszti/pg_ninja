@@ -190,245 +190,64 @@ class pg_engine:
 				self.logger.error(null_col [0])
 		
 		
-	def sync_obfuscation(self, obfdic, clean_idx=False):
-		
-		
-		if clean_idx:
-			self.clear_obfuscation_reindex()
-		table_limit = ''
-		table_limit_pk = ''
-		if self.table_limit[0] != '*':
-			table_limit = self.pg_conn.pgsql_cur.mogrify(""" AND table_name IN  (SELECT unnest(%s))""",(self.table_limit, )).decode()
-			table_limit_pk = self.pg_conn.pgsql_cur.mogrify(""" AND tab.relname IN  (SELECT unnest(%s))""",(self.table_limit, )).decode()
-		
-		
-		sql_get_clear="""
-			SELECT 
-				table_schema,
-				table_name 
-				
-			FROM  
-				information_schema.tables 
-			WHERE 
-					table_name NOT IN  
-						(
-							SELECT 
-								unnest(%s)
-						) 
-				AND table_schema=%s
-				AND table_type='BASE TABLE'
-				""" + table_limit + """
-			;
+	def sync_obfuscation(self, obfdic):
 		"""
-		sql_get_obf="""
-				SELECT 
-					table_name 
-				FROM
-					information_schema.tables
-				WHERE
-					table_name IN  (SELECT  unnest(%s)) 
-					AND table_schema=%s
-					AND table_type='BASE TABLE'
-					""" + table_limit + """
-			EXCEPT
-				SELECT 
-					table_name FROM
-				information_schema.tables
-				WHERE
-						table_name IN  (SELECT unnest(%s)) 
-					AND table_schema=%s
-					AND table_type='BASE TABLE'
-					""" + table_limit + """
-		;
+			The method syncs the obfuscation schema using the schema in clear and the obfuscation dictionary
 		"""
-		obf_list = []
-		for obf_table in  obfdic:
-			obf_list.append(obf_table)
-		
-		self.logger.info("saving index and key definitions for tables in schema %s"  % (self.obf_schema))
-		
-		sql_idx_def="""
-			
-			INSERT INTO sch_ninja.t_rebuild_idx
-				(
-					v_schema_name,
-					v_table_name,
-					v_index_name,
-					v_index_type,
-					t_create,
-					t_drop
-				)
-				SELECT
-					table_schema,
-					table_name,
-					tabidx.relname,
-					'index'::character varying(30),
-					pg_get_indexdef(indexrelid,0,true)||';' as t_create,
-					format('DROP INDEX %%I.%%I;',
-						table_schema,
-						tabidx.relname
-					) AS t_drop
-					
-				FROM 
-					pg_index idx
-					INNER JOIN 
-						(
-							SELECT 
-								format('%%I.%%I',table_schema,table_name)::regclass tabid,
-								table_schema,
-								TABLE_NAME
-							FROM
-								information_schema.tables tab
-									
-							WHERE
-									table_name IN  (SELECT unnest(%s)) 
-									AND table_schema=%s
-								AND table_type='BASE TABLE'
-								""" + table_limit + """
-						) tab
-					ON 
-						tab.tabid=idx.indrelid
-					INNER JOIN pg_class tabidx
-					ON
-						idx.indexrelid=tabidx.oid
-				WHERE 
-					not indisprimary
-				ON CONFLICT DO NOTHING
-
-				;
-		"""
-		self.pg_conn.pgsql_cur.execute(sql_idx_def, (obf_list, self.obf_schema))	
-		sql_pkeys = """
-							INSERT INTO sch_ninja.t_rebuild_idx
-							(
-								v_schema_name,
-								v_table_name,
-								v_index_name,
-								v_index_type,
-								t_create,
-								t_drop
-							)
-							SELECT
-								sch.nspname,
-								tab.relname,
-								con.conname,
-								'primary'::character varying(30),
-								format('ALTER TABLE %%I.%%I ADD CONSTRAINT %%I %%s;',
-									sch.nspname,
-									tab.relname,
-									con.conname,
-									pg_get_constraintdef(con.oid)
-								) AS t_create,
-								format('ALTER TABLE %%I.%%I DROP CONSTRAINT %%I CASCADE;',
-									sch.nspname,
-									tab.relname,
-									con.conname
-								) AS t_drop
-								
-							FROM 
-								pg_constraint con
-								INNER JOIN
-								pg_class tab
-								ON
-									tab.oid=con.conrelid
-								INNER JOIN 
-								pg_namespace sch
-								ON
-									sch.oid=con.connamespace
-							WHERE
-									con.contype='p'
-								AND tab.relname IN  (SELECT unnest(%s)) 
-								AND sch.nspname=%s
-								""" + table_limit_pk + """
-								
-							ON CONFLICT DO NOTHING
-							;
-					"""
-		self.pg_conn.pgsql_cur.execute(sql_pkeys, (obf_list, self.obf_schema))	
-		
-		self.logger.info("finding tables no longer obfuscated...")
-		self.pg_conn.pgsql_cur.execute(sql_get_clear, (obf_list, self.obf_schema))	
-		tab_clear=self.pg_conn.pgsql_cur.fetchall()
-		self.logger.info("finding tables requiring obfuscation...")
-		self.pg_conn.pgsql_cur.execute(sql_get_obf, (obf_list, self.dest_schema, obf_list, self.obf_schema))	
-		tab_obf=self.pg_conn.pgsql_cur.fetchall()
-		for tab in tab_clear:
-			self.logger.info("dropping table %s from the schema %s " % (tab[1], tab[0]))
-			self.drop_obf_rel(tab[1], "TABLE")
-		
-		for tab in tab_obf:
-			self.logger.info("creating table %s in schema %s " % (tab[0], self.obf_schema))
-			self.drop_obf_rel(tab[0], "VIEW")
-			self.create_obf_child(tab[0])
-			self.sync_obf_table(tab[0], obfdic[tab[0]])
-			sql_pk = """SELECT 
-								format('ALTER TABLE %%I.%%I ADD CONSTRAINT %%I %%s;',
-											%s,
-											tab.relname,
-											pk.conname,
-											pg_get_constraintdef(pk.oid)
-										) AS t_create
-							FROM 
-								pg_constraint pk
-								INNER JOIN pg_namespace sch 
-								ON 
-									sch.oid=pk.connamespace
-								INNER JOIN pg_class tab 
-								ON
-									tab.oid=pk.conrelid
-							WHERE
-									sch.nspname=%s
-								AND pk.contype='p'
-								AND tab.relname=%s
-							; """
-			self.pg_conn.pgsql_cur.execute(sql_pk, (self.obf_schema, self.dest_schema, tab[0]))	
-			tab_pk=self.pg_conn.pgsql_cur.fetchone()
-			self.pg_conn.pgsql_cur.execute(tab_pk[0])
-		for tab in obfdic:
-			if self.table_limit == '*' or tab in self.table_limit:
-				self.sync_obf_table(tab, obfdic[tab])
-		
-		self.create_views(obfdic)
-		self.drop_null_obf()
-		
-		
-	def sync_obf_table(self, tab, obfdata):
-		self.logger.info("dropping indices and pkey on table %s in schema %s " % (tab, self.obf_schema))	
-		sql_get_drop="""SELECT 
-						t_drop
-					FROM 
-						sch_ninja.t_rebuild_idx  
-					WHERE
-						v_table_name=%s
-						AND v_schema_name=%s
-					; """
-		self.pg_conn.pgsql_cur.execute(sql_get_drop, (tab, self.obf_schema))	
-		drop_idx=self.pg_conn.pgsql_cur.fetchall()
-		for drop_stat in drop_idx:
+		for table in self.table_limit:
 			try:
-				self.pg_conn.pgsql_cur.execute(drop_stat[0])
+				obfdata = obfdic[table]
+				self.logger.info("Refreshing obfuscation for table %s " % (table))
+				self.refresh_obf_table(table, obfdata)
 			except:
-				print("could not drop the index")
+				self.logger.info("Table %s is not obfuscated. Refreshing the view" % (table))
+				self.refresh_obf_view(table)
+	
+	def refresh_obf_view(self, table):
+		sql_drop_table = """ DROP TABLE IF EXISTS "%s"."%s" CASCADE;""" % (self.obf_schema, table)
+		sql_drop_view = """ DROP VIEW IF EXISTS "%s"."%s" CASCADE;""" % (self.obf_schema, table)
+		sql_create = """ CREATE OR REPLACE VIEW "%s"."%s" AS SELECT * FROM "%s"."%s";""" % (self.obf_schema, table, self.dest_schema, table)
 		
-		self.logger.info("syncronising data for table %s in schema %s " % (tab, self.obf_schema))	
-		self.copy_obf_data(tab, obfdata)
-		self.logger.info("creating indices and pkey on table %s in schema %s " % (tab, self.obf_schema))	
-		sql_get_create="""SELECT 
-						t_create
-					FROM 
-						sch_ninja.t_rebuild_idx  
-					WHERE
-						v_table_name=%s
-						AND v_schema_name=%s
-					; """
-		self.pg_conn.pgsql_cur.execute(sql_get_create, (tab, self.obf_schema))	
-		create_idx=self.pg_conn.pgsql_cur.fetchall()
-		for create_stat in create_idx:
-			try:
-				self.pg_conn.pgsql_cur.execute(create_stat [0])
-			except psycopg2.Error as e:
-				self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
-				self.logger.error(create_stat [0])
+		try:
+			self.pg_conn.pgsql_cur.execute(sql_drop_table)
+		except:
+			pass
+		
+		try:
+			self.logger.info("Trying to replace the view %s" % (table))
+			self.pg_conn.pgsql_cur.execute(sql_create)
+			
+		except:
+			self.logger.info("Running a drop/create for the view %s" % (table))
+			self.pg_conn.pgsql_cur.execute(sql_drop_view)
+			self.pg_conn.pgsql_cur.execute(sql_create)
+		
+		
+		
+	def refresh_obf_table(self, table, obfdata):
+		sql_drop_table = """ DROP TABLE IF EXISTS "%s"."%s" CASCADE;""" % (self.obf_schema, table)
+		sql_drop_view = """ DROP VIEW IF EXISTS "%s"."%s" CASCADE;""" % (self.obf_schema, table)
+
+		sql_create_table = """
+			CREATE TABLE "%s"."%s"
+				(LIKE "%s"."%s")
+		;
+		""" % (self.obf_schema, table, self.dest_schema, table)
+		try:
+			self.pg_conn.pgsql_cur.execute(sql_drop_view)
+		except:
+			pass
+		
+		try:
+			self.logger.info("Trying to drop the table %s in schema %s " % (table, self.obf_schema))	
+			self.pg_conn.pgsql_cur.execute(sql_drop_table)
+			self.pg_conn.pgsql_cur.execute(sql_create_table)
+			self.alter_obf_fields(table)
+			self.copy_obf_data(table, obfdata)
+		except:
+			self.logger.info("Couldn't refresh the table %s" % (table))
+			
+			
 		
 		
 	def create_obf_child(self, table):
@@ -909,11 +728,19 @@ class pg_engine:
 		self.pg_conn.pgsql_cur.execute(sql_path)
 	
 	def build_idx_ddl(self, obfdic={}):
-		table_obf=[table for table in obfdic]
-		
 		""" the function iterates over the list l_pkeys and builds a new list with the statements for pkeys """
-		for table_name in self.table_metadata:
-			table=self.table_metadata[table_name]
+		if self.table_limit[0] != '*' :
+			table_metadata = {}
+			for tab in self.table_limit:
+				try:
+					table_metadata[tab] = self.table_metadata[tab]
+				except:
+					pass
+		else:
+			table_metadata = self.table_metadata
+		table_obf=[table for table in obfdic]
+		for table_name in table_metadata:
+			table=table_metadata[table_name]
 			
 			table_name=table["name"]
 			indices=table["indices"]
@@ -944,7 +771,7 @@ class pg_engine:
 				self.idx_sequence+=1
 					
 			self.idx_ddl[table_name]=table_idx
-			
+		
 	def get_schema_version(self):
 		"""
 			Gets the service schema version.
