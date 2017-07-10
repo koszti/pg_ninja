@@ -249,9 +249,14 @@ class mysql_engine:
 						log_seq = int(log_file.split('.')[1])
 						log_pos = int(log_position)
 						table_dic = inc_tables[table_name]
-						if log_seq >= table_dic["log_seq"] and log_pos >= table_dic["log_pos"]:
+						if log_seq > table_dic["log_seq"]:
+							table_consistent = True
+						elif log_seq == table_dic["log_seq"] and log_pos >= table_dic["log_pos"]:
+							table_consistent = True
+							
+						if table_consistent:
 							add_row = True
-							self.logger.debug("CONSISTENT POINT FOR TABLE REACHED %s - binlogfile %s, position %s" % (table_name, binlogfile, log_position))
+							self.logger.debug("CONSISTENT POINT FOR TABLE %s REACHED  - binlogfile %s, position %s" % (table_name, binlogfile, log_position))
 							pg_engine.set_consistent_table(table_name)
 							inc_tables = pg_engine.get_inconsistent_tables()
 						else:

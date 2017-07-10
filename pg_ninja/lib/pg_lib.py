@@ -1859,4 +1859,4 @@ class pg_engine:
 			;
 		"""
 		self.pg_conn.pgsql_cur.execute(sql_set, (self.i_id_source, table, self.dest_schema))
-		self.pg_conn.pgsql_cur.execute(sql_set, (self.i_id_source, table, self.sch_obf))
+		self.pg_conn.pgsql_cur.execute(sql_set, (self.i_id_source, table, self.obf_schema))
