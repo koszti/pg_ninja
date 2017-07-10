@@ -218,8 +218,9 @@ class replica_engine(object):
 		:param command: the command specified on the pg_ninja.py command line. This value is used to generate the log filename (see the class global_config).
 		
 	"""
-	def __init__(self, config, stdout=False):
+	def __init__(self, config, debug_mode=False):
 		
+		self.debug_mode = debug_mode
 		self.global_config=global_config(config)
 		self.logger = logging.getLogger(__name__)
 		self.logger.setLevel(logging.DEBUG)
@@ -227,14 +228,13 @@ class replica_engine(object):
 		self.lst_yes= ['yes',  'Yes', 'y', 'Y']
 		formatter = logging.Formatter("%(asctime)s: [%(levelname)s] - %(filename)s (%(lineno)s): %(message)s", "%b %e %H:%M:%S")
 		
-		if self.global_config.log_dest=='stdout':
+		if self.global_config.log_dest=='stdout' or self.debug_mode:
 			fh=logging.StreamHandler(sys.stdout)
-			
 		elif self.global_config.log_dest=='file':
 			fh = TimedRotatingFileHandler(self.global_config.log_file, when="d",interval=1,backupCount=self.global_config.log_days_keep)
 		
 		
-		if self.global_config.log_level=='debug':
+		if self.global_config.log_level=='debug' or self.debug_mode:
 			fh.setLevel(logging.DEBUG)
 		elif self.global_config.log_level=='info':
 			fh.setLevel(logging.INFO)
@@ -442,65 +442,38 @@ class replica_engine(object):
 			self.create_views()
 		self.pg_eng.set_source_id('initialised')
 		self.enable_replica()
-		self.email_alerts.send_end_init_replica()
+		if not self.debug_mode:
+			self.email_alerts.send_end_init_replica()
 		
 		
 	
-	def sync_replica(self, table):
+	def sync_tables(self, table):
 		"""
-			This method is similar to the init_replica with some notable exceptions.
-			The tables on postgresql are not dropped. 
-			All indices on the existing tables are dropped for speeding up the reload.
-			The tables are truncated. However if the truncate is not possible a delete and vacuum is executed.
-			The copy table data doesn't copy the obfuscated data.
-			The indices are created using the informations collected in the pg_engine's method get_index_def.
-			The method sync_obfuscation is used to sync the obfuscation in a separate process.
+			syncronise single tables with the mysql master.
+			The process attempts to drop the existing tables or add them if not present.
+			The tables are stored in the replica catalogue with their master's coordinates and are ignored until the replica process reaches
+			the correct position. 
+			:param table: comma separated list of table names to synchronise
 		"""
-		self.stop_replica(allow_restart=False)
-		self.pg_eng.set_source_id('initialising')
-		self.pg_eng.table_limit=table.split(',')
-		self.pg_eng.get_index_def()
-		self.pg_eng.drop_src_indices()
-		self.pg_eng.truncate_tables()
-		self.copy_table_data(copy_obfus=False)
-		self.pg_eng.create_src_indices()
-		self.sync_obfuscation(False, table, True)
-		self.pg_eng.set_source_id('initialised')
-		self.enable_replica()
-		self.email_alerts.send_end_sync_replica()
-	
-	def add_table(self, table):
-		"""
-			This method adds an existing table to the replica.
-			
-		"""
-		
-		if table:
-			table_to_add = table.split(',')
+		if table != "*":
+			table_limit = table.split(',')
+			self.my_eng.lock_tables()
+			self.pg_eng.table_limit = table_limit
+			self.pg_eng.master_status = self.my_eng.master_status
 			self.pg_eng.set_source_id('initialising')
-			self.logger.info("finding the tables with primary key")
-			#tables_pk = self.pg_eng.check_primary_key(table_to_add)
-			tables_pk = self.my_eng.check_primary_key(table_to_add)
-			table_to_add = [tab[0] for tab in tables_pk]
-			if len(table_to_add)>0:
-				self.logger.info("locking the tables on MySQL")
-				self.my_eng.lock_tables()
-				self.logger.info("Stopping the replica")
-				self.stop_replica(allow_restart=False)
-				self.logger.info("processing the not replayed batches")
-				self.pg_eng.process_batch(self.global_config.reply_batch_size)
-				self.logger.info("adding the tables")
-				self.my_eng.mysql_con.tables_limit = table_to_add
-				self.my_eng.get_table_metadata()
-				self.pg_eng.table_metadata = self.my_eng.my_tables
-				self.pg_eng.build_tab_ddl()
-				self.create_schema(drop_tables=True)
-				self.my_eng.copy_table_data(self.pg_eng, copy_max_memory=self.global_config.copy_max_memory, copy_obfuscated=True, lock_tables=False)
-				self.my_eng.unlock_tables()
-				self.create_indices()
-				self.create_views()
-				self.enable_replica()
+			self.stop_replica(allow_restart=False)
+			self.pg_eng.build_tab_ddl()
+			self.pg_eng.drop_tables()
+			self.pg_eng.create_tables()
+			self.my_eng.copy_table_data(self.pg_eng,  self.global_config.copy_max_memory, False, False)
+			self.pg_eng.create_indices()
 			self.pg_eng.set_source_id('initialised')
+			self.my_eng.unlock_tables()
+			self.enable_replica()
+		else:
+			print("You should specify at least one table to synchronise.")
+	
+	
 
 			
 	def add_source(self):

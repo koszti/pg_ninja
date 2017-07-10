@@ -100,7 +100,7 @@ class pg_engine:
 		self.type_ddl={}
 		self.pg_charset=self.pg_conn.pg_charset
 		self.batch_retention = global_config.batch_retention
-		self.cat_version='0.12'
+		self.cat_version='0.13'
 		self.cat_sql=[
 			{'version':'base','script': 'create_schema.sql'}, 
 			{'version':'0.8','script': 'upgrade/cat_0.8.sql'}, 
@@ -108,6 +108,7 @@ class pg_engine:
 			{'version':'0.10','script': 'upgrade/cat_0.10.sql'}, 
 			{'version':'0.11','script': 'upgrade/cat_0.11.sql'}, 
 			{'version':'0.12','script': 'upgrade/cat_0.12.sql'}, 
+			{'version':'0.13','script': 'upgrade/cat_0.13.sql'}, 
 			
 		]
 		cat_version=self.get_schema_version()
@@ -115,6 +116,8 @@ class pg_engine:
 		if cat_version!=self.cat_version and int(num_schema)>0:
 			self.upgrade_service_schema()
 		self.table_limit = ['*']
+		self.master_status = None
+		
 	
 	
 	def drop_obf_rel(self, relname, type):
@@ -644,31 +647,98 @@ class pg_engine:
 		self.pg_conn.pgsql_cur.execute(sql_schema)
 		self.pg_conn.pgsql_cur.execute(sql_path)
 	
+		
 	def store_table(self, table_name):
+		"""
+			The method saves the table name along with the primary key definition in the table t_replica_tables.
+			This is required in order to let the replay procedure which primary key to use replaying the update and delete.
+			If the table is without primary key is not stored. 
+			A table without primary key is copied and the indices are create like any other table. 
+			However the replica doesn't work for the tables without primary key.
+			
+			If the class variable master status is set then the master's coordinates are saved along with the table.
+			This happens in general when a table is added to the replica or the data is refreshed with sync_tables.
+			
+			
+			:param table_name: the table name to store in the table  t_replica_tables
+		"""
+		if self.master_status:
+			master_data = self.master_status[0]
+			binlog_file = master_data["File"]
+			binlog_pos = master_data["Position"]
+		else:
+			binlog_file = None
+			binlog_pos = None
 		table_data=self.table_metadata[table_name]
+		table_no_pk = True
 		for index in table_data["indices"]:
 			if index["index_name"]=="PRIMARY":
-				sql_insert=""" INSERT INTO sch_ninja.t_replica_tables 
-										(
-											i_id_source,
-											v_table_name,
-											v_schema_name,
-											v_table_pkey
-										)
-										VALUES (
-														%s,
-														%s,
-														%s,
-														ARRAY[%s]
-													)
-										ON CONFLICT (i_id_source,v_table_name,v_schema_name)
-											DO UPDATE 
-												SET v_table_pkey=EXCLUDED.v_table_pkey
+				table_no_pk = False
+				sql_insert=""" 
+					INSERT INTO sch_ninja.t_replica_tables 
+						(
+							i_id_source,
+							v_table_name,
+							v_schema_name,
+							v_table_pkey,
+							t_binlog_name,
+							i_binlog_position
+						)
+					VALUES 
+						(
+							%s,
+							%s,
+							%s,
+							ARRAY[%s],
+							%s,
+							%s
+						)
+					ON CONFLICT (i_id_source,v_table_name,v_schema_name)
+						DO UPDATE 
+							SET 
+								v_table_pkey=EXCLUDED.v_table_pkey,
+								t_binlog_name = EXCLUDED.t_binlog_name,
+								i_binlog_position = EXCLUDED.i_binlog_position
 										;
 								"""
-				self.pg_conn.pgsql_cur.execute(sql_insert, (self.i_id_source, table_name, self.dest_schema, index["index_columns"].strip()))	
-				self.pg_conn.pgsql_cur.execute(sql_insert, (self.i_id_source, table_name, self.obf_schema, index["index_columns"].strip()))	
-	
+				self.pg_conn.pgsql_cur.execute(sql_insert, (
+					self.i_id_source, 
+					table_name, 
+					self.dest_schema, 
+					index["index_columns"].strip(), 
+					binlog_file, 
+					binlog_pos
+					)
+				)
+				self.pg_conn.pgsql_cur.execute(sql_insert, (
+					self.i_id_source, 
+					table_name, 
+					self.obf_schema, 
+					index["index_columns"].strip(), 
+					binlog_file, 
+					binlog_pos
+					)
+				)
+		if table_no_pk:
+			sql_delete = """
+				DELETE FROM sch_ninja.t_replica_tables
+				WHERE
+						i_id_source=%s
+					AND	v_table_name=%s
+					AND	v_schema_name=%s
+				;
+			"""
+			self.pg_conn.pgsql_cur.execute(sql_delete, (
+				self.i_id_source, 
+				table_name, 
+				self.dest_schema)
+				)
+			self.pg_conn.pgsql_cur.execute(sql_delete, (
+				self.i_id_source, 
+				table_name, 
+				self.obf_schema)
+				)
+
 		
 	
 	def unregister_table(self, table_name):
@@ -776,9 +846,20 @@ class pg_engine:
 				self.logger.error(" - > Insert values: %s" % (column_values) )
 				
 	def build_tab_ddl(self):
-		""" the function iterates over the list l_tables and builds a new list with the statements for tables"""
+		""" 
+			The method iterates over the list l_tables and builds a new list with the statements for tables
+		"""
+		if self.table_limit[0] != '*' :
+			table_metadata = {}
+			for tab in self.table_limit:
+				try:
+					table_metadata[tab] = self.table_metadata[tab]
+				except:
+					pass
+		else:
+			table_metadata = self.table_metadata
 		
-		for table_name in self.table_metadata:
+		for table_name in table_metadata:
 			table=self.table_metadata[table_name]
 			columns=table["columns"]
 			
@@ -809,7 +890,23 @@ class pg_engine:
 			def_columns=str(',').join(ddl_columns)
 			self.type_ddl[table["name"]]=ddl_enum
 			self.table_ddl[table["name"]]=ddl_head+def_columns+ddl_tail
-		
+
+	def drop_tables(self):
+		"""
+			The method drops the tables present in the table_ddl
+		"""
+		self.set_search_path()
+		for table in self.table_ddl:
+			self.logger.debug("dropping table %s " % (table, ))
+			sql_drop = """DROP TABLE IF EXISTS "%s"  CASCADE;""" % (table, )
+			self.pg_conn.pgsql_cur.execute(sql_drop)
+	
+	def set_search_path(self):
+		"""
+			The method sets the search path for the connection.
+		"""
+		sql_path=" SET search_path=%s;" % (self.dest_schema, )
+		self.pg_conn.pgsql_cur.execute(sql_path)
 	
 	def build_idx_ddl(self, obfdic={}):
 		table_obf=[table for table in obfdic]
@@ -1707,3 +1804,59 @@ class pg_engine:
 		tables_pk = self.pg_conn.pgsql_cur.fetchall()
 		return tables_pk
 		
+	def get_inconsistent_tables(self):
+		"""
+			The method collects the tables in not consistent state.
+			The informations are stored in a dictionary which key is the table's name.
+			The dictionary is used in the read replica loop to determine wheter the table's modifications
+			should be ignored because in not consistent state.
+			
+			:return: a dictionary with the tables in inconsistent state and their snapshot coordinates.
+			:rtype: dictionary
+		"""
+		sql_get = """
+			SELECT
+				v_schema_name,				
+				v_table_name,
+				t_binlog_name,
+				i_binlog_position
+			FROM
+				sch_ninja.t_replica_tables
+			WHERE
+				t_binlog_name IS NOT NULL
+				AND i_binlog_position IS NOT NULL
+				AND i_id_source = %s
+		;
+		"""
+		inc_dic = {}
+		self.pg_conn.pgsql_cur.execute(sql_get, (self.i_id_source, ))
+		inc_results = self.pg_conn.pgsql_cur.fetchall()
+		for table  in inc_results:
+			tab_dic = {}
+			tab_dic["schema"]  = table[0]
+			tab_dic["table"]  = table[1]
+			tab_dic["log_seq"]  = int(table[2].split('.')[1])
+			tab_dic["log_pos"]  = int(table[3])
+			inc_dic[table[1]] = tab_dic
+		return inc_dic
+		
+	def set_consistent_table(self, table):
+		"""
+			The method set to NULL the  binlog name and position for the given table.
+			When the table is marked consistent the read replica loop reads and saves the table's row images.
+			
+			:param table: the table name
+		"""
+		sql_set = """
+			UPDATE sch_ninja.t_replica_tables
+				SET 
+					t_binlog_name = NULL,
+					i_binlog_position = NULL
+			WHERE
+					i_id_source = %s
+				AND	v_table_name = %s
+				AND	v_schema_name = %s
+			;
+		"""
+		self.pg_conn.pgsql_cur.execute(sql_set, (self.i_id_source, table, self.dest_schema))
+		self.pg_conn.pgsql_cur.execute(sql_set, (self.i_id_source, table, self.obf_schema))

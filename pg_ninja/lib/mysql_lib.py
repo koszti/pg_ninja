@@ -153,6 +153,7 @@ class mysql_engine:
 	
 		"""
 		table_type_map=self.get_table_type_map()	
+		inc_tables = pg_engine.get_inconsistent_tables()
 		close_batch=False
 		total_events=0
 		master_data={}
@@ -212,18 +213,23 @@ class mysql_engine:
 					self.sql_token.parse_sql(binlogevent.query)
 					
 					for token in self.sql_token.tokenised:
-						if len(token)>0:
-							self.logger.debug("CAPTURED QUERY- binlogfile %s, position %s. Lenght group insert: %s \n Query: %s " % (binlogfile, binlogevent.packet.log_pos, grp_length, binlogevent.query))
-							self.logger.debug("""TOKEN: %s """ % (token, ))
-							query_data={
-										"binlog":log_file, 
-										"logpos":log_position, 
-										"schema": self.schema_clear, 
-										"batch_id":id_batch, 
-										"log_table":log_table
-							}
-							pg_engine.write_ddl(token, query_data, [table for table in self.obfdic])
-							close_batch=True
+						write_ddl = True
+						if token["name"] in inc_tables:
+							write_ddl = False
+						if write_ddl:
+							event_time = binlogevent.timestamp
+							if len(token)>0:
+								self.logger.debug("CAPTURED QUERY- binlogfile %s, position %s. Lenght group insert: %s \n Query: %s " % (binlogfile, binlogevent.packet.log_pos, grp_length, binlogevent.query))
+								self.logger.debug("""TOKEN: %s """ % (token, ))
+								query_data={
+											"binlog":log_file, 
+											"logpos":log_position, 
+											"schema": self.schema_clear, 
+											"batch_id":id_batch, 
+											"log_table":log_table
+								}
+								pg_engine.write_ddl(token, query_data, [table for table in self.obfdic])
+								close_batch=True
 						
 					self.sql_token.reset_lists()
 					if close_batch:
@@ -233,11 +239,28 @@ class mysql_engine:
 			else:
 				
 				for row in binlogevent.rows:
+					add_row = True
 					log_file=binlogfile
 					log_position=binlogevent.packet.log_pos
 					table_name=binlogevent.table
+					event_time=binlogevent.timestamp
 					column_map=table_type_map[table_name]
-
+					if table_name in inc_tables:
+						log_seq = int(log_file.split('.')[1])
+						log_pos = int(log_position)
+						table_dic = inc_tables[table_name]
+						if log_seq > table_dic["log_seq"]:
+							table_consistent = True
+						elif log_seq == table_dic["log_seq"] and log_pos >= table_dic["log_pos"]:
+							table_consistent = True
+							
+						if table_consistent:
+							add_row = True
+							self.logger.debug("CONSISTENT POINT FOR TABLE %s REACHED  - binlogfile %s, position %s" % (table_name, binlogfile, log_position))
+							pg_engine.set_consistent_table(table_name)
+							inc_tables = pg_engine.get_inconsistent_tables()
+						else:
+							add_row = False
 
 					global_data={
 										"binlog":log_file,
@@ -250,54 +273,55 @@ class mysql_engine:
 					event_data={}
 					event_update={}
 					event_data_obf={}
-					if isinstance(binlogevent, DeleteRowsEvent):
-						global_data["action"] = "delete"
-						event_values=row["values"]
-					elif isinstance(binlogevent, UpdateRowsEvent):
-						global_data["action"] = "update"
-						event_values=row["after_values"]
-						event_update=row["before_values"]
-					elif isinstance(binlogevent, WriteRowsEvent):
-						global_data["action"] = "insert"
-						event_values=row["values"]
-					global_obf=dict(global_data.items())
-					global_obf["schema"]=self.schema_obf
-					for column_name in event_values:
-						column_data_type=column_map[column_name]
-						column_type=column_data_type["data_type"]
-						if column_type in self.hexify and event_values[column_name]:
-							event_values[column_name]=binascii.hexlify(event_values[column_name])
-					for column_name in event_update:
-						column_data_type=column_map[column_name]
-						column_type=column_data_type["data_type"]
-						if column_type in self.hexify and event_update[column_name]:
-							event_update[column_name]=binascii.hexlify(event_update[column_name])
-						elif column_type in self.hexify and isinstance(event_update[column_name], bytes):
-							event_update[column_name] = ''
+					if add_row:
+						if isinstance(binlogevent, DeleteRowsEvent):
+							global_data["action"] = "delete"
+							event_values=row["values"]
+						elif isinstance(binlogevent, UpdateRowsEvent):
+							global_data["action"] = "update"
+							event_values=row["after_values"]
+							event_update=row["before_values"]
+						elif isinstance(binlogevent, WriteRowsEvent):
+							global_data["action"] = "insert"
+							event_values=row["values"]
+						global_obf=dict(global_data.items())
+						global_obf["schema"]=self.schema_obf
+						for column_name in event_values:
+							column_data_type=column_map[column_name]
+							column_type=column_data_type["data_type"]
+							if column_type in self.hexify and event_values[column_name]:
+								event_values[column_name]=binascii.hexlify(event_values[column_name])
+						for column_name in event_update:
+							column_data_type=column_map[column_name]
+							column_type=column_data_type["data_type"]
+							if column_type in self.hexify and event_update[column_name]:
+								event_update[column_name]=binascii.hexlify(event_update[column_name])
+							elif column_type in self.hexify and isinstance(event_update[column_name], bytes):
+								event_update[column_name] = ''
 
-					try:
-						obf_list=self.obfdic[table_name]
-						event_values_obf=dict(event_values.items())
-					except:
-						obf_list=None
-						event_values_obf=None
-
-					if obf_list:
 						try:
-							for column_name in obf_list:
-								obf_mode=obf_list[column_name]
-								event_values_obf[column_name]=self.obfuscate_value(event_values_obf[column_name], obf_mode, column_data_type)
+							obf_list=self.obfdic[table_name]
+							event_values_obf=dict(event_values.items())
 						except:
-							self.logger.error("discarded row in obfuscation process.\n global_data:%s \n event_data:%s \n" % (global_data,event_values ))
+							obf_list=None
+							event_values_obf=None
 
-					event_data = dict(event_data.items() +event_values.items())
-					event_insert={"global_data":global_data,"event_data":event_data,  "event_update":event_update}
-					group_insert.append(event_insert)
+						if obf_list:
+							try:
+								for column_name in obf_list:
+									obf_mode=obf_list[column_name]
+									event_values_obf[column_name]=self.obfuscate_value(event_values_obf[column_name], obf_mode, column_data_type)
+							except:
+								self.logger.error("discarded row in obfuscation process.\n global_data:%s \n event_data:%s \n" % (global_data,event_values ))
 
-					if event_values_obf:
-						event_data_obf = dict(event_data_obf.items() +event_values_obf.items())
-						event_obf={"global_data":global_obf,"event_data":event_data_obf ,  "event_update":event_update}
-						group_insert.append(event_obf)
+						event_data = dict(event_data.items() +event_values.items())
+						event_insert={"global_data":global_data,"event_data":event_data,  "event_update":event_update}
+						group_insert.append(event_insert)
+
+						if event_values_obf:
+							event_data_obf = dict(event_data_obf.items() +event_values_obf.items())
+							event_obf={"global_data":global_obf,"event_data":event_data_obf ,  "event_update":event_update}
+							group_insert.append(event_obf)
 
 
 					master_data["File"]=log_file
@@ -661,6 +685,28 @@ class mysql_engine:
 			current_slice=current_slice+1
 	
 	def copy_table_data(self, pg_engine,  copy_max_memory,  copy_obfuscated=True,  lock_tables=True):
+		"""
+			copy the table data from mysql to postgres
+			param pg_engine: The postgresql engine required to write into the postgres database.
+			The process determines the estimated optimal slice size using copy_max_memory and avg_row_length 
+			from MySQL's information_schema.TABLES. If the table contains no rows then the slice size is set to a
+			reasonable high value (100,000) in order to get the table copied in one slice. The estimated numer of slices is determined using the 
+			slice size.
+			Then generate_select is used to build the csv and insert columns for the table.
+			An unbuffered cursor is used to pull the data from MySQL using the CSV format. The fetchmany with copy_limit (slice size) is called
+			to pull out the rows into a file object. 
+			The copy_mode determines wheter to use a file (out_file) or an in memory file object (io.StringIO()).
+			If there no more rows the loop exits, otherwise continue to the next slice. When the slice is saved the method pg_engine.copy_data is
+			executed to load the data into the PostgreSQL table.
+			If some error occurs the slice number is saved into the list slice_insert and after all the slices are copied the fallback procedure insert_table_data
+			process the remaining slices using the inserts.
+			
+			:param pg_engine: the postgresql engine
+			:param copy_max_memory: The estimated maximum amount of memory to use in a single slice copy
+			:param copy_obfuscated: The estimated maximum amount of memory to use in a single slice copy
+			:param lock_tables: Specifies whether the tables should be locked before copying the data
+			
+		"""
 		out_file='%s/output_copy.csv' % self.out_dir
 		self.logger.info("locking the tables")
 		if lock_tables:
@@ -769,7 +815,11 @@ class mysql_engine:
 		self.master_status=self.mysql_con.my_cursor.fetchall()		
 		
 	def lock_tables(self):
-		""" lock tables and get the log coords """
+		""" 
+			The method locks the tables using FLUSH TABLES WITH READ LOCK. The 
+			tables locked are limited to the tables found by get_table_metadata.
+			After locking the tables the metod gets the master's coordinates with get_master_status.
+		"""
 		self.locked_tables=[]
 		for table_name in self.my_tables:
 			table=self.my_tables[table_name]
