@@ -443,7 +443,7 @@ class replica_engine(object):
 			copy_obfus = True
 		self.copy_table_data(copy_obfus)
 		self.create_indices()
-		if self.global_config.obfdic != {}:
+		if copy_obfus:
 			self.create_views()
 		self.pg_eng.set_source_id('initialised')
 		self.enable_replica()
