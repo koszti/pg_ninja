@@ -1247,7 +1247,7 @@ class pg_engine:
 		path_clear=""" SET search_path="%s"; """ % (self.dest_schema, )
 		path_obf= """ SET search_path="%s"; """ % (self.obf_schema, ) 
 		ddl_query=self.gen_query(token)
-		if token["command"] ==  "ALTER TABLE" and token["name"] not in obflist:
+		if token["command"] ==  "ALTER TABLE" and token["name"] not in obflist and self.dest_schema != self.obf_schema:
 			sql_drop_view = """DROP VIEW IF EXISTS "%s" CASCADE; """ % (token["name"], )
 			sql_create_view = """CREATE OR REPLACE VIEW "%s" AS SELECT * FROM "%s"."%s";""" % (token["name"],self.dest_schema, token["name"] )
 			pg_ddl = path_obf + sql_drop_view + path_clear + ddl_query + path_obf + sql_create_view

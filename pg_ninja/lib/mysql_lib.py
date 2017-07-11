@@ -214,8 +214,21 @@ class mysql_engine:
 					
 					for token in self.sql_token.tokenised:
 						write_ddl = True
-						if token["name"] in inc_tables:
+						table_name = token["name"] 
+						if table_name in inc_tables:
 							write_ddl = False
+							log_seq = int(log_file.split('.')[1])
+							log_pos = int(log_position)
+							table_dic = inc_tables[table_name]
+							if log_seq > table_dic["log_seq"]:
+								write_ddl = True
+							elif log_seq == table_dic["log_seq"] and log_pos >= table_dic["log_pos"]:
+								write_ddl = True
+							if write_ddl:
+								self.logger.debug("CONSISTENT POINT FOR TABLE %s REACHED  - binlogfile %s, position %s" % (table_name, binlogfile, log_position))
+								pg_engine.set_consistent_table(table_name)
+								inc_tables = pg_engine.get_inconsistent_tables()
+							
 						if write_ddl:
 							event_time = binlogevent.timestamp
 							if len(token)>0:

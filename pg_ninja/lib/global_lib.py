@@ -88,7 +88,7 @@ class global_config(object):
 			Class  constructor.
 		"""
 		
-		obfuscation_file='config/obfuscation.yaml'
+		
 		
 		python_lib=get_python_lib()
 		cham_dir = "%s/.pg_ninja" % os.path.expanduser('~')	
@@ -146,8 +146,10 @@ class global_config(object):
 			self.sleep_loop = confdic["sleep_loop"]
 			self.source_name= confdic["source_name"]
 			self.batch_retention = confdic["batch_retention"]
-			if confdic["obfuscation_file"]:
+			if confdic["obfuscation_file"] and self.schema_clear != self.schema_obf:
 				obfuscation_file=confdic["obfuscation_file"]
+			else:
+				obfuscation_file = ''
 			copy_max_memory = str(confdic["copy_max_memory"])[:-1]
 			copy_scale = str(confdic["copy_max_memory"])[-1]
 			try:
@@ -167,7 +169,6 @@ class global_config(object):
 		except KeyError as missing_key:
 			print "**FATAL - missing parameter %s in configuration file. check config/config-example.yaml for reference" % (missing_key, )
 			sys.exit()
-		
 		self.load_obfuscation(obfuscation_file)
 		
 		
@@ -436,9 +437,13 @@ class replica_engine(object):
 		self.pg_eng.set_source_id('initialising')
 		self.pg_eng.clean_batch_data()
 		self.create_schema(drop_tables=True)
-		self.copy_table_data()
+		if self.global_config.schema_clear == self.global_config.schema_obf:
+			copy_obfus = False
+		else:
+			copy_obfus = True
+		self.copy_table_data(copy_obfus)
 		self.create_indices()
-		if self.global_config.obfdic != {}:
+		if copy_obfus:
 			self.create_views()
 		self.pg_eng.set_source_id('initialised')
 		self.enable_replica()
