@@ -287,7 +287,7 @@ class replica_engine(object):
 			self.logger.info("Replica already enabled")
 	
 		
-	def sync_obfuscation(self, table='*'):
+	def sync_obfuscation(self, table, send_email):
 		"""
 			the function sync the obfuscated tables using the obfuscation file indicated in the configuration.
 			The replica is stopped and disabled before starting the obfuscation sync.
@@ -305,9 +305,10 @@ class replica_engine(object):
 		self.pg_eng.sync_obfuscation(self.global_config.obfdic)
 		self.pg_eng.set_source_id('initialised')
 		self.logger.info("Sync complete, replica can be restarted")
-		self.enable_replica()
-		#if send_email:
-		#	self.email_alerts.send_end_sync_obfuscation()
+		
+		if send_email:
+			self.enable_replica()
+			self.email_alerts.send_end_sync_obfuscation()
 			
 		
 		
