@@ -61,7 +61,7 @@ class email_alerts:
 		self.connect_to_smtp()
 		if self.server:
 			msg_subject="[%s] - sync obfuscation complete" % self.email_config["subj_prefix"]
-			msg_body="""%s the  database obfuscated schema synchronisation is now complete. Please start the replica process. """
+			msg_body="""%s the  obfuscated schema synchronisation is now complete. Please start the replica process. """
 			msg_header=	"From: %s\r\nTo: %s\r\nSubject: %s\r\n\r\n" % (self.email_config["email_from"],  ', '.join(self.email_config["email_rcpt"]), msg_subject)
 			msg_body=msg_body	% (msg_header)
 			

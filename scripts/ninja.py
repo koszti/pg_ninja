@@ -51,7 +51,7 @@ if args.command in commands:
 	elif args.command == commands[4]:
 		replica.drop_service_schema()
 	elif args.command == commands[5]:
-		replica.sync_obfuscation(args.table)
+		replica.sync_obfuscation(args.table, True)
 	elif args.command == commands[6]:
 		replica.sync_tables(args.table)
 	elif args.command == commands[7]:
