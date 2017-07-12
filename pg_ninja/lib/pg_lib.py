@@ -190,12 +190,30 @@ class pg_engine:
 				self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
 				self.logger.error(null_col [0])
 		
+	
+	def get_sync_tables(self):
+		sql_get = """
+			SELECT
+				table_name
+			FROM
+				information_schema.tables
+			WHERE
+				table_schema=%s
+			;
+		"""
+		self.pg_conn.pgsql_cur.execute(sql_get, (self.dest_schema, ))
+		tab_clear = self.pg_conn.pgsql_cur.fetchall()
+		self.sync_tables = [ tab[0] for tab in tab_clear if tab[0] in self.table_limit or  self.table_limit[0] == '*' ]
 		
+	
 	def sync_obfuscation(self, obfdic):
+		
 		"""
 			The method syncs the obfuscation schema using the schema in clear and the obfuscation dictionary
 		"""
-		for table in self.table_limit:
+		self.get_sync_tables()
+		
+		for table in self.sync_tables:
 			try:
 				obfdata = obfdic[table]
 				self.logger.info("Refreshing obfuscation for table %s " % (table))
@@ -203,7 +221,7 @@ class pg_engine:
 			except:
 				self.logger.info("Table %s is not obfuscated. Refreshing the view" % (table))
 				self.refresh_obf_view(table)
-	
+		
 	def refresh_obf_view(self, table):
 		sql_drop_table = """ DROP TABLE IF EXISTS "%s"."%s" CASCADE;""" % (self.obf_schema, table)
 		sql_drop_view = """ DROP VIEW IF EXISTS "%s"."%s" CASCADE;""" % (self.obf_schema, table)
