@@ -147,7 +147,7 @@ class global_config(object):
 			self.source_name= confdic["source_name"]
 			self.batch_retention = confdic["batch_retention"]
 			if confdic["obfuscation_file"] and self.schema_clear != self.schema_obf:
-				obfuscation_file=confdic["obfuscation_file"]
+				obfuscation_file= os.path.expanduser(confdic["obfuscation_file"])
 			else:
 				obfuscation_file = ''
 			copy_max_memory = str(confdic["copy_max_memory"])[:-1]
@@ -187,6 +187,7 @@ class global_config(object):
 			self.obfdic=yaml.load(obfile.read())
 			obfile.close()
 		else:
+			print "**WARNING - could not load the obfuscation file %s " % (obfuscation_file, )
 			self.obfdic = {}
 		
 	def get_source_name(self, config_name = 'default'):
@@ -286,7 +287,7 @@ class replica_engine(object):
 			self.logger.info("Replica already enabled")
 	
 		
-	def sync_obfuscation(self, send_email=True, table='*', cleanup_idx=False):
+	def sync_obfuscation(self, table='*'):
 		"""
 			the function sync the obfuscated tables using the obfuscation file indicated in the configuration.
 			The replica is stopped and disabled before starting the obfuscation sync.
@@ -294,15 +295,19 @@ class replica_engine(object):
 			
 			:param send_email=True: if true an email is sent when the process is complete.
 		"""
+		self.pg_eng.set_source_id('initialising')
+		if self.pg_eng.dest_schema == self.pg_eng.obf_schema:
+			print("There is no obfuscation setup for the source %s" % self.global_config.source_name  )
+			sys.exit(1)
 		self.pg_eng.table_limit=table.split(',')
 		self.stop_replica(allow_restart=False)
 		self.pg_eng.set_source_id('initialising')
-		self.pg_eng.sync_obfuscation(self.global_config.obfdic, cleanup_idx)
+		self.pg_eng.sync_obfuscation(self.global_config.obfdic)
 		self.pg_eng.set_source_id('initialised')
 		self.logger.info("Sync complete, replica can be restarted")
-		if send_email:
-			self.enable_replica()
-			self.email_alerts.send_end_sync_obfuscation()
+		self.enable_replica()
+		#if send_email:
+		#	self.email_alerts.send_end_sync_obfuscation()
 			
 		
 		
