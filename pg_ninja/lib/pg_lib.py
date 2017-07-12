@@ -359,6 +359,7 @@ class pg_engine:
 		build_idx = [ idx[0] for idx in build_idx ]
 		for idx in build_idx:
 			try:
+				self.logger.error("Running: %s" % (idx))
 				self.pg_conn.pgsql_cur.execute(idx)
 			except:
 				self.logger.error("Couldn't add the index to the table %s. \nIndex definition: %s" % (table, idx))
