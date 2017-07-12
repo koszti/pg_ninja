@@ -241,7 +241,7 @@ class pg_engine:
 			self.pg_conn.pgsql_cur.execute(sql_drop_view)
 			self.pg_conn.pgsql_cur.execute(sql_create)
 		
-		
+	
 		
 	def refresh_obf_table(self, table, obfdata):
 		sql_drop_table = """ DROP TABLE IF EXISTS "%s"."%s" CASCADE;""" % (self.obf_schema, table)
@@ -263,11 +263,103 @@ class pg_engine:
 			self.pg_conn.pgsql_cur.execute(sql_create_table)
 			self.alter_obf_fields(table)
 			self.copy_obf_data(table, obfdata)
+			self.build_obf_idx(table)
 		except:
-			self.logger.info("Couldn't refresh the table %s" % (table))
+			self.logger.error("Couldn't refresh the table %s" % (table))
 			
 			
-		
+	def build_obf_idx(self, table):
+		sql_get_idx = """
+			SELECT 
+				CASE
+					WHEN indisprimary
+					THEN 
+						format(
+							'ALTER TABLE %%I.%%I ADD CONSTRAINT %%I PRIMARY KEY(%%s);',
+							sch_obf,
+							table_name,
+							index_name,
+							column_names
+							
+						)
+					WHEN indisunique
+					THEN 
+						format(
+							'CREATE UNIQUE INDEX %%I ON %%I.%%I (%%s);',
+							index_name,
+							sch_obf,
+							table_name,
+							column_names
+						)
+					ELSE
+						format(
+							'CREATE INDEX %%I ON %%I.%%I (%%s);',
+							index_name,
+							sch_obf,
+							table_name,
+							column_names
+						)
+					
+				
+				END as create_idx
+			FROM
+			(
+				SELECT 
+					tab.relname as table_name,
+					sch.nspname as schema_name,
+					idx.relname as index_name,
+					idx_tab.indisprimary,
+					idx_tab.indisunique,
+					string_agg(quote_ident(col.attname),',') as column_names
+				FROM 
+					pg_class tab
+					INNER JOIN pg_namespace sch
+					ON
+						sch.oid=tab.relnamespace
+					INNER JOIN 
+						(
+							SELECT
+								indisprimary,
+								indisunique,
+								unnest(indkey) as indkey,
+								indrelid,
+								indexrelid
+							FROM
+								pg_index
+						) idx_tab
+						ON tab.oid=idx_tab.indrelid
+					INNER JOIN pg_class idx
+						ON idx_tab.indexrelid=idx.oid
+					INNER JOIN pg_attribute col
+						ON 
+								tab.oid=col.attrelid
+							AND	col.attnum = idx_tab.indkey
+				WHERE
+						tab.relname=%s
+					AND	sch.nspname=%s
+					AND 	col.attnum>0
+				GROUP BY 
+					tab.relname,
+					sch.nspname,
+					idx.relname,
+					idx_tab.indisprimary,
+					idx_tab.indisunique
+				
+			) t_idx,
+			(
+				SELECT
+					%s AS sch_obf
+			) t_obf
+
+			;
+
+		"""
+		self.pg_conn.pgsql_cur.execute(sql_get_idx, (table, self.dest_schema, self.obf_schema ) )
+		build_idx = self.pg_conn.pgsql_cur.fetchall()
+		build_idx = [ idx[0] for idx in build_idx ]
+		for idx in build_idx:
+			self.pg_conn.pgsql_cur.execute(idx)
+			
 		
 	def create_obf_child(self, table):
 		sql_check="""SELECT 
