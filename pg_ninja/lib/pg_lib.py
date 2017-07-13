@@ -191,35 +191,74 @@ class pg_engine:
 				self.logger.error(null_col [0])
 		
 	
-	def get_sync_tables(self):
-		sql_get = """
+	def get_sync_tables(self, obfdic):
+		obf_list = [tab for tab in obfdic]
+		sql_get_tables = """
 			SELECT
 				table_name
 			FROM
 				information_schema.tables
 			WHERE
-				table_schema=%s
+					table_schema=%s
+				AND table_name = ANY(%s)
 			;
 		"""
-		self.pg_conn.pgsql_cur.execute(sql_get, (self.dest_schema, ))
+		
+		sql_get_views = """
+			SELECT
+				table_name
+			FROM
+				information_schema.tables
+			WHERE
+					table_schema=%s
+				AND table_name != ALL(%s)
+			;
+		"""
+		self.pg_conn.pgsql_cur.execute(sql_get_tables, (self.dest_schema, obf_list))
 		tab_clear = self.pg_conn.pgsql_cur.fetchall()
 		self.sync_tables = [ tab[0] for tab in tab_clear if tab[0] in self.table_limit or  self.table_limit[0] == '*' ]
 		
-	
+		self.pg_conn.pgsql_cur.execute(sql_get_views, (self.dest_schema, obf_list))
+		views_clear = self.pg_conn.pgsql_cur.fetchall()
+		self.sync_views = [ view[0] for view in views_clear if tab[0] in self.table_limit or  self.table_limit[0] == '*' ]
+		
+	def refresh_views(self, obfdic):
+		self.get_sync_tables(obfdic)
+		for table in self.sync_views:
+			self.logger.info("Processing view %s " % (table))
+			try:
+				obfdata = obfdic[table]
+				self.logger.debug("Refreshing obfuscation for table %s " % (table))
+				self.refresh_obf_table(table, obfdata)
+			except:
+				self.logger.debug("Table %s is not obfuscated. Refreshing the view" % (table))
+				self.refresh_obf_view(table)
+		
 	def sync_obfuscation(self, obfdic):
 		
 		"""
 			The method syncs the obfuscation schema using the schema in clear and the obfuscation dictionary
 		"""
-		self.get_sync_tables()
+		self.get_sync_tables(obfdic)
 		
 		for table in self.sync_tables:
+			self.logger.info("Processing table %s " % (table))
 			try:
 				obfdata = obfdic[table]
-				self.logger.info("Refreshing obfuscation for table %s " % (table))
+				self.logger.debug("Refreshing obfuscation for table %s " % (table))
 				self.refresh_obf_table(table, obfdata)
 			except:
 				self.logger.info("Table %s is not obfuscated. Refreshing the view" % (table))
+				self.refresh_obf_view(table)
+		
+		for table in self.sync_views:
+			self.logger.info("Processing view %s " % (table))
+			try:
+				obfdata = obfdic[table]
+				self.logger.debug("Refreshing obfuscation for table %s " % (table))
+				self.refresh_obf_table(table, obfdata)
+			except:
+				self.logger.debug("Table %s is not obfuscated. Refreshing the view" % (table))
 				self.refresh_obf_view(table)
 		
 	def refresh_obf_view(self, table):
@@ -233,13 +272,16 @@ class pg_engine:
 			pass
 		
 		try:
-			self.logger.info("Trying to replace the view %s" % (table))
+			self.logger.debug("Trying to replace the view %s" % (table))
 			self.pg_conn.pgsql_cur.execute(sql_create)
 			
 		except:
-			self.logger.info("Running a drop/create for the view %s" % (table))
-			self.pg_conn.pgsql_cur.execute(sql_drop_view)
-			self.pg_conn.pgsql_cur.execute(sql_create)
+			self.logger.warning("Running a drop/create for the view %s" % (table))
+			try:
+				self.pg_conn.pgsql_cur.execute(sql_drop_view)
+				self.pg_conn.pgsql_cur.execute(sql_create)
+			except:
+				self.logger.error("Couldn't refresh the view %s" % (table))
 		
 	
 		
@@ -258,7 +300,7 @@ class pg_engine:
 			pass
 		
 		try:
-			self.logger.info("Trying to drop the table %s in schema %s " % (table, self.obf_schema))	
+			self.logger.debug("Trying to drop the table %s in schema %s " % (table, self.obf_schema))	
 			self.pg_conn.pgsql_cur.execute(sql_drop_table)
 			self.pg_conn.pgsql_cur.execute(sql_create_table)
 			self.alter_obf_fields(table)
@@ -359,10 +401,10 @@ class pg_engine:
 		build_idx = [ idx[0] for idx in build_idx ]
 		for idx in build_idx:
 			try:
-				self.logger.error("Running: %s" % (idx))
+				self.logger.info("Running: %s" % (idx))
 				self.pg_conn.pgsql_cur.execute(idx)
 			except:
-				self.logger.error("Couldn't add the index to the table %s. \nIndex definition: %s" % (table, idx))
+				self.logger.info("Couldn't add the index to the table %s. \nIndex definition: %s" % (table, idx))
 			
 		
 	def create_obf_child(self, table):
@@ -1422,7 +1464,7 @@ class pg_engine:
 			st_vacuum=tab_clean[2]
 			tab_name=tab_clean[3]
 			try:
-				self.logger.info("running truncate table on %s" % (tab_name,))
+				self.logger.debug("running truncate table on %s" % (tab_name,))
 				self.pg_conn.pgsql_cur.execute(st_truncate)
 				
 			except:
