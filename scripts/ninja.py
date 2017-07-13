@@ -19,7 +19,8 @@ commands = [
 	'show_status' ,
 	'stop_replica', 
 	'disable_replica', 
-	'enable_replica'
+	'enable_replica', 
+	'refresh_views'
 	]
 command_help = 'Available commands, ' + ','.join(commands)
 
@@ -68,6 +69,8 @@ if args.command in commands:
 		replica.stop_replica(allow_restart=False)
 	elif args.command == commands[13]:
 		replica.enable_replica()
+	elif args.command == commands[14]:
+		replica.refresh_views()
 		
 
 else:
