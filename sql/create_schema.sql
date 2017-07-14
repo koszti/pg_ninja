@@ -2,7 +2,7 @@
 CREATE SCHEMA IF NOT EXISTS sch_ninja;
 CREATE OR REPLACE VIEW sch_ninja.v_version 
  AS
-	SELECT '0.12'::TEXT t_version
+	SELECT '0.14'::TEXT t_version
 ;
 
 CREATE TABLE sch_ninja.t_discarded_rows
@@ -170,20 +170,28 @@ BEGIN
     LOOP
         RAISE DEBUG 'CREATING TABLE %', r_tables.v_log_table;
         t_sql:=format('
-                        CREATE TABLE IF NOT EXISTS sch_ninja.%I
-                        (
-                        CONSTRAINT pk_%s PRIMARY KEY (i_id_event),
-                          CONSTRAINT fk_%s FOREIGN KEY (i_id_batch) 
-                        	REFERENCES  sch_ninja.t_replica_batch (i_id_batch)
-                    	ON UPDATE RESTRICT ON DELETE CASCADE
-                        )
-                        INHERITS (sch_ninja.t_log_replica)
-                        ;',
+			CREATE TABLE IF NOT EXISTS sch_ninja.%I
+			(
+			CONSTRAINT pk_%s PRIMARY KEY (i_id_event),
+			  CONSTRAINT fk_%s FOREIGN KEY (i_id_batch) 
+				REFERENCES  sch_ninja.t_replica_batch (i_id_batch)
+			ON UPDATE RESTRICT ON DELETE CASCADE
+			)
+			INHERITS (sch_ninja.t_log_replica)
+			;',
                         r_tables.v_log_table,
                         r_tables.v_log_table,
                         r_tables.v_log_table
                 );
         EXECUTE t_sql;
+	t_sql:=format('
+			CREATE INDEX IF NOT EXISTS idx_id_batch_%s 
+			ON sch_ninja.%I (i_id_batch)
+			;',
+			r_tables.v_log_table,
+                        r_tables.v_log_table
+		);
+	EXECUTE t_sql;
     END LOOP;
 END
 $BODY$
