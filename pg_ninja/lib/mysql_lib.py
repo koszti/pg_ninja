@@ -438,24 +438,6 @@ class mysql_engine:
 		
 	def get_column_metadata(self, table, obf_list):
 		
-		date_fields=[]
-		normal_noprfx=[]
-		normal_prfx=[]
-		sql_prfx=["""SELECT ' ' as column_name,  -100 as nonhash_start, -100 as nonhash_length"""]
-		
-		if obf_list:
-			for field in obf_list:
-				if obf_list[field]["mode"]=="date":
-					date_fields.append(field)
-				elif obf_list[field]["mode"]=="normal" and obf_list[field]["nonhash_length"]==0:
-					normal_noprfx.append(field)
-				elif obf_list[field]["mode"]=="normal" and obf_list[field]["nonhash_length"]>0:
-					normal_prfx.append(field)
-					sql_prfx.append("""SELECT '%s' as column_name,  %s as nonhash_start, %s as nonhash_length""" % (field, obf_list[field]["nonhash_start"], obf_list[field]["nonhash_length"]))
-		sql_substr=' UNION '.join(sql_prfx)
-		
-		
-		
 
 		sql_columns="""
 			SELECT 
@@ -484,52 +466,10 @@ class mysql_engine:
 					THEN
 						concat('cast(`',column_name,'` AS unsigned)')
 				ELSE
-					concat('`',column_name,'`')
+					concat('cast(`',column_name,'` AS char CHARACTER SET """+ self.mysql_con.my_charset +""")')
 				END
 				AS column_csv_clear,
 				CASE
-					WHEN
-						column_name IN ('"""+"','".join(date_fields)+"""')
-					THEN
-						concat('DATE_FORMAT(`',column_name,'`,','''%%Y-01-01'')')
-					WHEN
-						column_name IN ('"""+"','".join(normal_noprfx)+"""')
-					THEN
-						concat('substr(','sha2(`',column_name,'`,256),1,',character_maximum_length,')' )
-					WHEN
-						column_name IN ('"""+"','".join(normal_prfx)+"""')
-					THEN
-						(
-						SELECT 
-								concat(
-											'substr(',
-											'concat(substr(`',column_name,'`,',nonhash_start,',',nonhash_length,')',','
-											'sha2(`',column_name,'`,256)',
-											'),',
-											'1,',
-											character_maximum_length,
-											')'
-											
-										)
-							FROM
-							( """ + sql_substr + """) prefix
-							WHERE
-								prefix.column_name=information_schema.COLUMNS.column_name
-							
-						)
-					WHEN 
-						data_type IN ('"""+"','".join(self.hexify)+"""')
-					THEN
-						concat('hex(',column_name,')')
-					WHEN 
-						data_type IN ('bit')
-					THEN
-						concat('cast(`',column_name,'` AS unsigned)')
-				ELSE
-					concat('`',column_name,'`')
-				END
-				AS column_csv_obf,
-				CASE
 					WHEN 
 						data_type IN ('"""+"','".join(self.hexify)+"""')
 					THEN
@@ -539,53 +479,9 @@ class mysql_engine:
 					THEN
 						concat('cast(`',column_name,'` AS unsigned) AS','`',column_name,'`')
 				ELSE
-					concat('`',column_name,'`')
+					concat('cast(`',column_name,'` AS char CHARACTER SET """+ self.mysql_con.my_charset +""") AS','`',column_name,'`')
 				END
-				AS column_select_clear,
-				CASE
-					WHEN
-						column_name IN ('"""+"','".join(date_fields)+"""')
-					THEN
-						concat('DATE_FORMAT(`',column_name,'`,','''%%Y-01-01'') AS','`',column_name,'`')
-					WHEN
-						column_name IN ('"""+"','".join(normal_noprfx)+"""')
-					THEN
-						concat('substr(','sha2(`',column_name,'`,256),1,',character_maximum_length,') AS','`',column_name,'`')
-					WHEN
-						column_name IN ('"""+"','".join(normal_prfx)+"""')
-					THEN
-						(
-						SELECT 
-								concat(
-												'substr(',
-												'concat(substr(`',column_name,'`,',nonhash_start,',',nonhash_length,')',','
-												'sha2(`',column_name,'`,256)',
-												'),',
-												'1,',
-												character_maximum_length,
-												') as `',
-												column_name,
-												'`'
-												
-											)
-							FROM
-							( """ + sql_substr + """) prefix
-							WHERE
-								prefix.column_name=information_schema.COLUMNS.column_name
-							
-						)
-					WHEN 
-						data_type IN ('"""+"','".join(self.hexify)+"""')
-					THEN
-						concat('hex(',column_name,') AS','`',column_name,'`')
-					WHEN 
-						data_type IN ('bit')
-					THEN
-						concat('cast(`',column_name,'` AS unsigned) AS','`',column_name,'`')
-				ELSE
-					concat('`',column_name,'`')
-				END
-				AS column_select_obf
+				AS column_select_clear
 			FROM 
 				information_schema.COLUMNS 
 			WHERE 
