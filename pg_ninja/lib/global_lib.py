@@ -489,6 +489,7 @@ class replica_engine(object):
 			if self.global_config.obfdic != {}:
 				self.pg_eng.sync_obfuscation(self.global_config.obfdic)
 			self.pg_eng.create_indices()
+			self.pg_eng.delete_table_events()
 			self.enable_replica()
 		else:
 			print("You should specify at least one table to synchronise.")

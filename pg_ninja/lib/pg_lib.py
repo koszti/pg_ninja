@@ -1845,3 +1845,27 @@ class pg_engine:
 		"""
 		self.pg_conn.pgsql_cur.execute(sql_set, (self.i_id_source, table, self.dest_schema))
 		self.pg_conn.pgsql_cur.execute(sql_set, (self.i_id_source, table, self.obf_schema))
+	
+	def delete_table_events(self):
+		"""
+			The method removes the events from the log table for specific table and source. 
+			Is used to cleanup any residual event for a a synced table in the replica_engine's sync_table method.
+		"""
+		sql_clean = """
+			DELETE FROM sch_ninja.t_log_replica
+			WHERE 
+				i_id_event IN (
+							SELECT 
+								log.i_id_event
+							FROM
+								sch_ninja.t_replica_batch bat
+								INNER JOIN sch_ninja.t_log_replica log
+									ON  log.i_id_batch=bat.i_id_batch
+							WHERE
+									log.v_table_name=ANY(%s)
+								AND 	bat.i_id_source=%s
+						)
+			;
+		"""
+		self.pg_conn.pgsql_cur.execute(sql_clean, (self.table_limit, self.i_id_source, ))
+		
