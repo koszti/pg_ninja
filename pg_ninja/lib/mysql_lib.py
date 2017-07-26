@@ -731,6 +731,7 @@ class mysql_engine:
 			After locking the tables the metod gets the master's coordinates with get_master_status.
 		"""
 		self.locked_tables=[]
+		
 		for table_name in self.my_tables:
 			table=self.my_tables[table_name]
 			self.locked_tables.append(table["name"])
