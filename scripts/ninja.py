@@ -70,7 +70,7 @@ if args.command in commands:
 	elif args.command == commands[13]:
 		replica.enable_replica()
 	elif args.command == commands[14]:
-		replica.refresh_views()
+		replica.refresh_views(args.table)
 		
 
 else:
