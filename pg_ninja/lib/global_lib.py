@@ -310,10 +310,11 @@ class replica_engine(object):
 			self.enable_replica()
 			self.email_alerts.send_end_sync_obfuscation()
 			
-	def refresh_views(self):
+	def refresh_views(self, table):
 		"""
 			the function refreshes the view definitions for the tables not obfuscated
 		"""
+		self.pg_eng.table_limit=table.split(',')
 		self.pg_eng.set_source_id('initialising')
 		self.pg_eng.refresh_views(self.global_config.obfdic)
 		self.pg_eng.set_source_id('initialised')
