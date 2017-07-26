@@ -221,7 +221,9 @@ class pg_engine:
 		
 		self.pg_conn.pgsql_cur.execute(sql_get_views, (self.dest_schema, obf_list))
 		views_clear = self.pg_conn.pgsql_cur.fetchall()
-		self.sync_views = [ view[0] for view in views_clear if tab[0] in self.table_limit or  self.table_limit[0] == '*' ]
+		self.sync_views = [ view[0] for view in views_clear if view[0] in self.table_limit or  self.table_limit[0] == '*' ]
+		
+		
 		
 	def refresh_views(self, obfdic):
 		self.get_sync_tables(obfdic)
