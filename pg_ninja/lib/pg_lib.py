@@ -101,7 +101,7 @@ class pg_engine:
 		self.type_ddl={}
 		self.pg_charset=self.pg_conn.pg_charset
 		self.batch_retention = global_config.batch_retention
-		self.cat_version='0.14'
+		self.cat_version='0.15'
 		self.cat_sql=[
 			{'version':'base','script': 'create_schema.sql'}, 
 			{'version':'0.8','script': 'upgrade/cat_0.8.sql'}, 
@@ -111,6 +111,7 @@ class pg_engine:
 			{'version':'0.12','script': 'upgrade/cat_0.12.sql'}, 
 			{'version':'0.13','script': 'upgrade/cat_0.13.sql'}, 
 			{'version':'0.14','script': 'upgrade/cat_0.14.sql'}, 
+			{'version':'0.15','script': 'upgrade/cat_0.15.sql'}, 
 			
 		]
 		cat_version=self.get_schema_version()
