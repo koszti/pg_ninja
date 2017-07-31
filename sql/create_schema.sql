@@ -290,7 +290,7 @@ $BODY$
 					t_pk_update,
 					array_agg(quote_ident(t_column)) AS t_colunm,
 					string_agg(distinct format('%I=%L',t_column,jsb_event_data->>t_column),',') as  t_update,
-					array_agg(quote_literal(jsb_event_data->>t_column)) as t_event_data
+					array_agg(quote_nullable(jsb_event_data->>t_column)) as t_event_data
 				FROM
 				(
 					SELECT
