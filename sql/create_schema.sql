@@ -136,6 +136,8 @@ CREATE TABLE sch_ninja.t_replica_tables
   v_table_name character varying(100) NOT NULL,
   v_schema_name character varying(100) NOT NULL,
   v_table_pkey character varying(100)[] NOT NULL,
+  t_binlog_name text,
+  i_binlog_position integer,
   CONSTRAINT pk_t_replica_tables PRIMARY KEY (i_id_table)
 )
 WITH (
