@@ -341,7 +341,7 @@ class mysql_engine:
 					master_data["File"]=log_file
 					master_data["Position"]=log_position
 					master_data["Time"]=event_time
-					if total_events>=self.replica_batch_size:
+					if len(group_insert)>=self.replica_batch_size:
 						self.logger.debug("total events exceeded. Master data: %s  " % (master_data,  ))
 						total_events=0
 						pg_engine.write_batch(group_insert)
