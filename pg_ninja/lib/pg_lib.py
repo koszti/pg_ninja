@@ -101,7 +101,7 @@ class pg_engine:
 		self.type_ddl={}
 		self.pg_charset=self.pg_conn.pg_charset
 		self.batch_retention = global_config.batch_retention
-		self.cat_version='0.15'
+		self.cat_version='0.16'
 		self.cat_sql=[
 			{'version':'base','script': 'create_schema.sql'}, 
 			{'version':'0.8','script': 'upgrade/cat_0.8.sql'}, 
@@ -112,6 +112,7 @@ class pg_engine:
 			{'version':'0.13','script': 'upgrade/cat_0.13.sql'}, 
 			{'version':'0.14','script': 'upgrade/cat_0.14.sql'}, 
 			{'version':'0.15','script': 'upgrade/cat_0.15.sql'}, 
+			{'version':'0.16','script': 'upgrade/cat_0.16.sql'}, 
 			
 		]
 		cat_version=self.get_schema_version()
@@ -1246,19 +1247,51 @@ class pg_engine:
 				self.logger.error("error when storing event data. saving the discarded row")
 				self.save_discarded_row(row_data,global_data["batch_id"])
 	
-
 	def set_batch_processed(self, id_batch):
+		"""
+			The method updates the flag b_processed and sets the processed timestamp for the given batch id
+			
+			:param id_batch: the id batch to set as processed
+		"""
 		self.logger.debug("updating batch %s to processed" % (id_batch, ))
-		sql_update=""" UPDATE sch_ninja.t_replica_batch
-										SET
-												b_processed=True,
-												ts_processed=now()
-								WHERE
-										i_id_batch=%s
-								;
-							"""
+		sql_update=""" 
+			UPDATE sch_ninja.t_replica_batch
+				SET
+					b_processed=True,
+					ts_processed=now()
+			WHERE
+				i_id_batch=%s
+			;
+		"""
 		self.pg_conn.pgsql_cur.execute(sql_update, (id_batch, ))
-		
+		self.logger.debug("collecting events id for batch %s " % (id_batch, ))
+		sql_collect_events = """
+			INSERT INTO
+				sch_ninja.t_batch_events
+				(
+					i_id_batch,
+					i_id_event
+				)
+			SELECT
+				i_id_batch,
+				array_agg(i_id_event)
+			FROM
+			(
+				SELECT 
+					i_id_batch,
+					i_id_event,
+					ts_event_datetime
+				FROM 
+					sch_ninja.t_log_replica 
+				WHERE i_id_batch=%s
+				ORDER BY ts_event_datetime
+			) t_event
+			GROUP BY
+					i_id_batch
+			;
+		"""
+		self.pg_conn.pgsql_cur.execute(sql_collect_events, (id_batch, ))
+
 	def process_batch(self, replica_batch_size):
 		self.logger.debug("Replay batch in %s row chunks" % (replica_batch_size, ))
 		batch_loop=True
