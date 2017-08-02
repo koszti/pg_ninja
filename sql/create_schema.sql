@@ -215,6 +215,7 @@ LANGUAGE plpgsql
 ;
 
 	
+	
 CREATE OR REPLACE FUNCTION sch_ninja.fn_process_batch(integer,integer)
 RETURNS BOOLEAN AS
 $BODY$
@@ -238,16 +239,19 @@ $BODY$
 		
 		v_i_id_batch:= (
 			SELECT 
-				i_id_batch 
-			FROM ONLY
-				sch_ninja.t_replica_batch  
+				bat.i_id_batch 
+			FROM 
+				sch_ninja.t_replica_batch bat
+				INNER JOIN  sch_ninja.t_batch_events evt
+				ON
+					evt.i_id_batch=bat.i_id_batch
 			WHERE 
-					b_started 
-				AND	b_processed 
-				AND	NOT b_replayed
-				AND	i_id_source=p_i_source_id
+					bat.b_started 
+				AND	bat.b_processed 
+				AND	NOT bat.b_replayed
+				AND	bat.i_id_source=p_i_source_id
 			ORDER BY 
-				ts_created 
+				bat.ts_created 
 			LIMIT 1
 			)
 		;
@@ -485,18 +489,21 @@ $BODY$
 
 		v_i_id_batch:= (
 			SELECT 
-				i_id_batch 
-			FROM ONLY
-				sch_ninja.t_replica_batch  
+				bat.i_id_batch 
+			FROM 
+				sch_ninja.t_replica_batch bat
+				INNER JOIN  sch_ninja.t_batch_events evt
+				ON
+					evt.i_id_batch=bat.i_id_batch
 			WHERE 
-					b_started 
-				AND	b_processed 
-				AND	NOT b_replayed
-				AND	i_id_source=p_i_source_id
+					bat.b_started 
+				AND	bat.b_processed 
+				AND	NOT bat.b_replayed
+				AND	bat.i_id_source=p_i_source_id
 			ORDER BY 
-				ts_created 
+				bat.ts_created 
 			LIMIT 1
-		)
+			)
 		;
 		
 		IF v_i_id_batch IS NOT NULL
@@ -504,7 +511,6 @@ $BODY$
 			v_b_loop=True;
 		END IF;
 
-		
 		RETURN v_b_loop;
 
 	
