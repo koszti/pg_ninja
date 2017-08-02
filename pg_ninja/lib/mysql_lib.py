@@ -143,6 +143,39 @@ class mysql_engine:
 				column_value=None
 		return column_value
 	
+	def check_mysql_config(self):
+		"""
+			The method check if the mysql configuration is compatible with the replica requirements.
+			If all the configuration requirements are met then the return value is True.
+			Otherwise is false.
+			The parameters checked are
+			log_bin - ON if the binary log is enabled
+			binlog_format - must be ROW , otherwise the replica won't get the data
+			binlog_row_image - must be FULL, otherwise the row image will be incomplete
+			
+			:return: true if all the requirements are met, false if not
+			:rtype: boolean
+		"""
+		sql_log_bin = """SHOW GLOBAL VARIABLES LIKE 'log_bin';"""
+		self.mysql_con.my_cursor.execute(sql_log_bin)
+		variable_check = self.mysql_con.my_cursor.fetchone()
+		log_bin = variable_check["Value"]
+		
+		sql_log_bin = """SHOW GLOBAL VARIABLES LIKE 'binlog_format';"""
+		self.mysql_con.my_cursor.execute(sql_log_bin)
+		variable_check = self.mysql_con.my_cursor.fetchone()
+		binlog_format = variable_check["Value"]
+		
+		sql_log_bin = """SHOW GLOBAL VARIABLES LIKE 'binlog_row_image';"""
+		self.mysql_con.my_cursor.execute(sql_log_bin)
+		variable_check = self.mysql_con.my_cursor.fetchone()
+		binlog_row_image = variable_check["Value"]
+		if log_bin.upper() == 'ON' and binlog_format.upper() == 'ROW' and binlog_row_image.upper() == 'FULL':
+			replica_possible = True
+		else:
+			replica_possible = False
+		return replica_possible
+	
 	def read_replica(self, batch_data, pg_engine):
 		"""
 		Stream the replica using the batch data.
@@ -381,8 +414,6 @@ class mysql_engine:
 					self.logger.debug("updating processed flag for id_batch %s", (id_batch))
 					pg_engine.set_batch_processed(id_batch)
 					self.id_batch=None
-		self.logger.debug("replaying batch.")
-		pg_engine.process_batch(self.reply_batch_size)
 		
 
 	

@@ -43,12 +43,31 @@ class pg_connection:
 		if destination_schema:
 			self.dest_schema=destination_schema
 			self.schema_obf=None
-			#self.tmp_schema=self.dest_schema+"_tmp"
+			
 		
 	
 	def disconnect_db(self):
 		self.pgsql_conn.close()
-		
+	
+	def connect_replay_db(self):
+		"""
+			Connects to PostgreSQL using the parameters stored in pg_pars built adding the key dbname to the self.pg_conn dictionary.
+			The method after the connection creates a database cursor and set the session to autocommit.
+			This method creates an additional connection and cursor used by the replay process. 
+
+		"""
+		pg_pars=dict(list(self.pg_conn.items())+ list({'dbname':self.pg_database}.items()))
+		strconn="dbname=%(dbname)s user=%(user)s host=%(host)s password=%(password)s port=%(port)s"  % pg_pars
+		self.pgsql_conn_replay = psycopg2.connect(strconn)
+		self.pgsql_conn_replay.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+		self.pgsql_conn_replay.set_client_encoding(self.pg_charset)
+		self.pgsql_cur_replay=self.pgsql_conn_replay.cursor()
+	
+	def disconnect_replay_db(self):
+		"""
+			The method disconnects from the replay database connection.
+		"""
+		self.pgsql_conn_replay.close()
 
 class pg_engine:
 	def __init__(self, global_config, table_metadata,  logger, sql_dir='sql/'):
@@ -1297,9 +1316,13 @@ class pg_engine:
 		batch_loop=True
 		sql_process="""SELECT sch_ninja.fn_process_batch(%s,%s);"""
 		while batch_loop:
-			self.pg_conn.pgsql_cur.execute(sql_process, (replica_batch_size, self.i_id_source))
-			batch_result=self.pg_conn.pgsql_cur.fetchone()
-			batch_loop=batch_result[0]
+			try:
+				self.pg_conn.pgsql_cur_replay.execute(sql_process, (replica_batch_size, self.i_id_source))
+				batch_result=self.pg_conn.pgsql_cur_replay.fetchone()
+				batch_loop=batch_result[0]
+			except:
+				self.pg_conn.connect_replay_db()
+				
 			self.logger.debug("Batch loop value %s" % (batch_loop))
 		self.logger.debug("Cleaning replayed batches older than %s for source %s" % (self.batch_retention, self.i_id_source))
 		sql_cleanup="""DELETE FROM 
@@ -1311,7 +1334,7 @@ class pg_engine:
 									AND now()-ts_replayed>%s::interval
 									AND i_id_source=%s
 									 """
-		self.pg_conn.pgsql_cur.execute(sql_cleanup, (self.batch_retention, self.i_id_source))
+		self.pg_conn.pgsql_cur_replay.execute(sql_cleanup, (self.batch_retention, self.i_id_source))
 
 
 	def build_alter_table(self, token):
