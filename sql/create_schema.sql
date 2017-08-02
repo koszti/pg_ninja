@@ -2,7 +2,7 @@
 CREATE SCHEMA IF NOT EXISTS sch_ninja;
 CREATE OR REPLACE VIEW sch_ninja.v_version 
  AS
-	SELECT '0.16'::TEXT t_version
+	SELECT '0.17'::TEXT t_version
 ;
 
 CREATE TABLE sch_ninja.t_discarded_rows
