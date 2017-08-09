@@ -277,13 +277,14 @@ class mysql_engine:
 							add_row = False
 
 					global_data={
-										"binlog":log_file,
-										"logpos":log_position,
-										"schema": self.schema_clear,
-										"table": table_name,
-										"batch_id":id_batch,
-										"log_table":log_table
-									}
+						"binlog":log_file,
+						"logpos":log_position,
+						"schema": self.schema_clear,
+						"table": table_name,
+						"batch_id":id_batch,
+						"log_table":log_table, 
+						"event_time":event_time
+					}
 					event_data={}
 					event_update={}
 					event_data_obf={}
