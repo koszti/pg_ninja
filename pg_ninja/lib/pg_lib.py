@@ -101,7 +101,7 @@ class pg_engine:
 		self.type_ddl={}
 		self.pg_charset=self.pg_conn.pg_charset
 		self.batch_retention = global_config.batch_retention
-		self.cat_version='0.16'
+		self.cat_version='0.17'
 		self.cat_sql=[
 			{'version':'base','script': 'create_schema.sql'}, 
 			{'version':'0.8','script': 'upgrade/cat_0.8.sql'}, 
@@ -113,6 +113,7 @@ class pg_engine:
 			{'version':'0.14','script': 'upgrade/cat_0.14.sql'}, 
 			{'version':'0.15','script': 'upgrade/cat_0.15.sql'}, 
 			{'version':'0.16','script': 'upgrade/cat_0.16.sql'}, 
+			{'version':'0.17','script': 'upgrade/cat_0.17.sql'}, 
 			
 		]
 		cat_version=self.get_schema_version()
@@ -1075,7 +1076,7 @@ class pg_engine:
 		sql_event="""
 			UPDATE sch_ninja.t_sources 
 			SET 
-				ts_last_event=to_timestamp(%s),
+				ts_last_received=to_timestamp(%s),
 				v_log_table=ARRAY[v_log_table[2],v_log_table[1]]
 				
 			WHERE 
@@ -1759,21 +1760,31 @@ class pg_engine:
 			source_status = 'Not registered'
 		return source_status
 		
+
+		
 	def get_status(self):
-		"""the function list the sources with the running status and the eventual lag """
+		"""
+			The metod lists the sources with the running status and the eventual lag 
+			
+			:return: psycopg2 fetchall results 
+			:rtype: psycopg2 tuple
+		"""
 		sql_status="""
 			SELECT
 				t_source,
 				t_dest_schema,
 				enm_status,
-				date_trunc('seconds',now())-ts_last_event lag,
-				ts_last_event ,
+				 date_trunc('seconds',now())-ts_last_received lag,
+				ts_last_received,
+				ts_last_received-ts_last_replay,
+				ts_last_replay,
 				t_obf_schema
 			FROM 
 				sch_ninja.t_sources
 			ORDER BY 
 				t_source
-		; """
+			;
+		"""
 		self.pg_conn.pgsql_cur.execute(sql_status)
 		results = self.pg_conn.pgsql_cur.fetchall()
 		return results

@@ -1,6 +1,6 @@
 ALTER TABLE 	sch_ninja.t_log_replica ADD i_my_event_time bigint ;
 ALTER TABLE sch_ninja.t_sources ADD ts_last_replay timestamp without time zone;
-ALTER TABLE sch_ninjaeleon.t_sources RENAME COLUMN ts_last_event TO ts_last_received;
+ALTER TABLE sch_ninja.t_sources RENAME COLUMN ts_last_event TO ts_last_received;
 
 CREATE OR REPLACE FUNCTION sch_ninja.fn_process_batch(integer,integer)
 RETURNS BOOLEAN AS
