@@ -28,6 +28,7 @@ command_help = 'Available commands, ' + ','.join(commands)
 table_help =  """Specifies the table's name to sync. It's possible to specify multiple table names separated by comma. If the parameter is omitted all tables will be syncronised."""
 clean_help = """Cleans the index definitions before the re-sync. Use with caution."""
 debug_help = """Enables the debug mode with log on stdout and in debug verbosity, whether the config file says. """
+thread_help = """  When specified the replica process starts two threads for the read and replay."""
 
 parser = argparse.ArgumentParser(description='Command line for pg_ninja.',  add_help=True)
 parser.add_argument('command', metavar='command', type=str, help=command_help)
@@ -35,7 +36,7 @@ parser.add_argument('--config', metavar='config', type=str,  default='default', 
 parser.add_argument('--table', metavar='table', type=str,  default='*',  required=False, help=table_help)
 parser.add_argument('--clean', default=False, required=False, help=clean_help, action='store_true')
 parser.add_argument('--debug',  default=False,  required=False, help=debug_help,  action='store_true')
-
+parser.add_argument('--thread',  default=False,  required=False, help=thread_help,  action='store_true')
 
 args = parser.parse_args()
 
@@ -46,7 +47,10 @@ if args.command in commands:
 	elif args.command == commands[1]:
 		replica.init_replica()
 	elif args.command == commands[2]:
-		replica.run_replica()
+		if args.thread:
+			replica.run_replica_thread()
+		else:
+			replica.run_replica()
 	elif args.command == commands[3]:
 		replica.upgrade_service_schema()
 	elif args.command == commands[4]:

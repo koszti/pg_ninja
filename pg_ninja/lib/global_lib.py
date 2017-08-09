@@ -1,4 +1,4 @@
-from pg_ninja import mysql_connection, mysql_engine, pg_engine,  email_alerts
+from pg_ninja import mysql_engine, pg_engine,  email_alerts
 import yaml
 import sys
 import os
@@ -6,10 +6,9 @@ import time
 import logging
 from tabulate import tabulate
 from logging.handlers  import TimedRotatingFileHandler
-from datetime import datetime
 from distutils.sysconfig import get_python_lib
 from shutil import copy
-
+import threading
 
 class config_dir(object):
 	""" 
@@ -406,6 +405,83 @@ class replica_engine(object):
 			return_to_os=True
 		return return_to_os
 		
+
+	def check_file_exit(self):
+		process_exit=False
+		"""checks for the exit file and terminate the replica if the file is present. If there is the pid file is removed before  the function's return """
+		if os.path.isfile(self.exit_file):
+			if os.path.isfile(self.pid_file):
+				self.logger.info("exit file detected, removing the pid file and terminating the replica process")
+				os.remove(self.pid_file)
+			else:
+				self.logger.info("you shall remove the file %s before starting the replica process " % self.exit_file)
+			process_exit=True
+		return process_exit
+
+	def read_replica(self):
+		while True:
+			try:
+				self.my_eng.run_replica(self.pg_eng)
+			except:
+				break
+			
+			exit_request = self.check_file_exit()
+			if exit_request:
+				break
+			time.sleep(self.sleep_loop)
+			
+	def replay_replica(self):
+		while True:
+			try:
+				self.pg_eng.process_batch(self.global_config.replica_batch_size)
+			except:
+				break
+			exit_request = self.check_file_exit()
+			if exit_request:
+				break
+			time.sleep(self.sleep_loop)
+			
+	def run_replica_thread(self):
+		"""
+			Threaded version of run replica.
+		"""
+		replica_possible = self.my_eng.check_mysql_config()
+		if replica_possible:
+			self.logger.info("Configuration on MySQL allows replica.")
+		else:
+			print("** FATAL - The mysql configuration do not allow the replica.\n The parameters log_bin, binlog_format  and binlog_row_image are not set correctly.\n Check the documentation for further details.\n http://www.pgchameleon.org/documents/")
+			sys.exit()
+		already_running = self.check_running(write_pid=True)
+		exit_request = self.check_file_exit()
+		
+		if already_running:
+			sys.exit()
+		if exit_request:
+			self.pg_eng.set_source_id('stopped')
+			sys.exit()
+		self.pg_eng.set_source_id('running')
+		read_replica = threading.Thread(target=self.read_replica, name='read_replica')
+		read_replica.setDaemon(True)
+		replay_replica = threading.Thread(target=self.replay_replica, name='replay_replica')
+		replay_replica.setDaemon(True)
+		read_replica.start()
+		replay_replica.start()
+		while True:
+			read_alive = read_replica.isAlive()
+			replay_alive = read_replica.isAlive()
+			self.logger.info("Read thread running: %s - Replay thread running: %s" %(read_alive, replay_alive))
+			if not read_alive and not replay_alive:
+				self.pg_eng.set_source_id('stopped')
+				break
+			if (read_alive and not replay_alive) or (not read_alive and replay_alive):
+				self.stop_replica()
+				break
+			time.sleep(self.sleep_loop)
+
+
+
+
+
 	def run_replica(self):
 		"""
 			This is the main loop replica method.
@@ -419,6 +495,7 @@ class replica_engine(object):
 		self.pg_eng.set_source_id('running')
 		while True:
 			self.my_eng.run_replica(self.pg_eng)
+			self.pg_eng.process_batch(self.global_config.replica_batch_size)
 			self.logger.info("batch complete. sleeping %s second(s)" % (self.sleep_loop, ))
 			time.sleep(self.sleep_loop)
 			if self.check_request_exit():
