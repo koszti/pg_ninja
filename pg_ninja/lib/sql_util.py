@@ -395,7 +395,7 @@ class sql_token(object):
 			
 			:param sql_string: The sql string with the sql statements.
 		"""
-		#sql_string=re.sub(r'\s+default(.*?),', ' ', sql_string, re.IGNORECASE)
+		sql_string=re.sub(r'\s+default(.*?),', ' ', sql_string, re.IGNORECASE)
 		statements=sql_string.split(';')
 		for statement in statements:
 			
