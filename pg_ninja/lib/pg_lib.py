@@ -1198,7 +1198,7 @@ class pg_engine:
 			insert_list.append(self.pg_conn.pgsql_cur.mogrify("%s,%s,%s,%s,%s,%s,%s,%s,%s" ,  (
 						global_data["batch_id"], 
 						global_data["table"],  
-						self.dest_schema, 
+						global_data["schema"], 
 						global_data["action"], 
 						global_data["binlog"], 
 						global_data["logpos"], 
