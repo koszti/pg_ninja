@@ -1,3 +1,9 @@
+ALTER TABLE 	sch_ninja.t_log_replica ADD i_my_event_time bigint ;
+ALTER TABLE sch_ninja.t_sources ADD ts_last_replay timestamp without time zone;
+ALTER TABLE sch_ninja.t_sources RENAME COLUMN ts_last_event TO ts_last_received;
+
+
+
 
 CREATE OR REPLACE FUNCTION sch_ninja.fn_process_batch(integer,integer)
 RETURNS BOOLEAN AS
@@ -14,6 +20,7 @@ $BODY$
 		v_i_ddl		integer;
 		v_i_evt_replay	bigint[];
 		v_i_evt_queue		bigint[];
+		v_ts_evt_source	timestamp without time zone;
 	BEGIN
 		v_b_loop:=FALSE;
 		v_i_replayed:=0;
@@ -59,6 +66,16 @@ $BODY$
 				i_id_batch=v_i_id_batch
 		);
 
+		v_ts_evt_source:=(
+			SELECT 
+				to_timestamp(i_my_event_time)
+			FROM	
+				sch_ninja.t_log_replica
+			WHERE
+					i_id_event=v_i_evt_replay[array_length(v_i_evt_replay,1)]
+				AND	i_id_batch=v_i_id_batch
+		);
+		
 		IF v_i_id_batch IS NULL 
 		THEN
 			RETURN v_b_loop;
@@ -216,6 +233,16 @@ $BODY$
 		END LOOP;
 		
 
+		IF v_ts_evt_source IS NOT NULL
+		THEN
+			UPDATE sch_ninja.t_sources 
+				SET
+					ts_last_replay=v_ts_evt_source
+			WHERE 	
+				i_id_source=p_i_source_id
+			;
+		END IF;
+		
 		IF v_i_replayed=0 AND v_i_ddl=0
 		THEN
 			DELETE FROM sch_ninja.t_log_replica
