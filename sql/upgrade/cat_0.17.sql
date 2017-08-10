@@ -1,3 +1,4 @@
+
 CREATE OR REPLACE FUNCTION sch_ninja.fn_process_batch(integer,integer)
 RETURNS BOOLEAN AS
 $BODY$
