@@ -4,7 +4,18 @@ my_server_id: 100
 replica_batch_size: 1000
 reply_batch_size: 1000
 copy_max_memory: 300M
-my_database:  db_replica
+
+#database mappings, is possible to specify many mysql databases on the server. i's compulsory to specify the schema mappings
+database_mappings:
+    my_db:
+       schema_clear: my_db_clear
+       schema_obf: my_db_obf
+    my_test_db:
+       schema_clear: my_test_db_clear
+       schema_obf: my_test_db_obf
+
+
+#my_database:  db_replica
 pg_database: db_replication
 source_name: 'default'
 sleep_loop: 5

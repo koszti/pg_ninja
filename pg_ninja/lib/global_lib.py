@@ -116,6 +116,7 @@ class global_config(object):
 		
 		
 		try:
+			self.database_mappings = confdic["database_mappings"]
 			self.mysql_conn=confdic["mysql_conn"]
 			self.pg_conn=confdic["pg_conn"]
 			self.my_database=confdic["my_database"]
@@ -169,7 +170,9 @@ class global_config(object):
 			print "**FATAL - missing parameter %s in configuration file. check config/config-example.yaml for reference" % (missing_key, )
 			sys.exit()
 		self.load_obfuscation(obfuscation_file)
-		
+		self.replica_schemas = [database for database in self.database_mappings]
+		print(self.replica_schemas)
+		sys.exit()
 		
 		
 		
