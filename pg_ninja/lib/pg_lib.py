@@ -1328,11 +1328,11 @@ class pg_engine:
 		while batch_loop:
 			try:
 				self.pg_conn.pgsql_cur_replay.execute(sql_process, (replica_batch_size, self.i_id_source))
-				batch_result=self.pg_conn.pgsql_cur_replay.fetchone()
-				batch_loop=batch_result[0]
 			except:
 				self.pg_conn.connect_replay_db()
-				
+				self.pg_conn.pgsql_cur_replay.execute(sql_process, (replica_batch_size, self.i_id_source))
+			batch_result=self.pg_conn.pgsql_cur_replay.fetchone()
+			batch_loop=batch_result[0]
 			self.logger.debug("Batch loop value %s" % (batch_loop))
 		self.logger.debug("Cleaning replayed batches older than %s for source %s" % (self.batch_retention, self.i_id_source))
 		sql_cleanup="""DELETE FROM 
@@ -1345,6 +1345,7 @@ class pg_engine:
 									AND i_id_source=%s
 									 """
 		self.pg_conn.pgsql_cur_replay.execute(sql_cleanup, (self.batch_retention, self.i_id_source))
+
 
 
 	def build_alter_table(self, token):
