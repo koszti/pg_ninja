@@ -475,7 +475,7 @@ class replica_engine(object):
 				break
 			if (read_alive and not replay_alive) or (not read_alive and replay_alive):
 				self.stop_replica()
-				break
+				sys.exit(3)
 			time.sleep(self.sleep_loop)
 
 

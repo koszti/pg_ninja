@@ -216,6 +216,7 @@ class mysql_engine:
 				position=binlogevent.position
 				self.logger.debug("ROTATE EVENT - binlogfile %s, position %s. " % (binlogfile, position))
 				if log_file != binlogfile:
+					self.logger.debug("CLOSING BATCH - binlogfile %s, position %s. " % (binlogfile, position))
 					close_batch = True
 				if close_batch:
 					if log_file!=binlogfile:
@@ -228,11 +229,13 @@ class mysql_engine:
 					my_stream.close()
 					return [master_data, close_batch]
 				
+				
 			elif isinstance(binlogevent, QueryEvent):
 				try:
 					query_schema = binlogevent.schema.decode()
 				except:
 					query_schema = binlogevent.schema
+				
 				if binlogevent.query.strip().upper() not in self.stat_skip and query_schema == self.my_schema: 
 					grp_length = len(group_insert)
 					log_position = binlogevent.packet.log_pos

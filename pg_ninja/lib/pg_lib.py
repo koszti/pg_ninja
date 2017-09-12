@@ -1215,7 +1215,6 @@ class pg_engine:
 		csv_file.seek(0)
 		try:
 			
-			#self.pg_conn.pgsql_cur.execute(sql_insert)
 			sql_copy="""COPY "sch_ninja"."""+log_table+""" (
 									i_id_batch, 
 									v_table_name, 
@@ -1231,7 +1230,6 @@ class pg_engine:
 			self.pg_conn.pgsql_cur.copy_expert(sql_copy,csv_file)
 		except psycopg2.Error as e:
 			self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
-			self.logger.error(csv_data)
 			self.logger.error("fallback to inserts")
 			self.insert_batch(group_insert)
 	
@@ -1269,10 +1267,12 @@ class pg_engine:
 					global_data["binlog"], 
 					global_data["logpos"], 
 					json.dumps(event_data, cls=pg_encoder), 
-					json.dumps(event_update, cls=pg_encoder)), 
+					json.dumps(event_update, cls=pg_encoder), 
 					event_time
+					)
 				)
-			except:
+			except psycopg2.Error as e:
+				self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
 				self.logger.error("error when storing event data. saving the discarded row")
 				self.save_discarded_row(row_data,global_data["batch_id"])
 	
