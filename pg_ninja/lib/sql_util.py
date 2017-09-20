@@ -22,6 +22,8 @@ class sql_token(object):
 		self.query_list=[]
 		self.pkey_cols=""
 		
+		#re for rename items
+		self.m_rename_items = re.compile(r'(?:.*?\.)?(.*)\s*TO\s*(?:.*?\.)?(.*)(?:;)?', re.IGNORECASE)
 		#re for column definitions
 		self.m_columns=re.compile(r'\((.*)\)', re.IGNORECASE)
 		self.m_inner=re.compile(r'\((.*)\)', re.IGNORECASE)
@@ -29,7 +31,7 @@ class sql_token(object):
 		#re for keys and indices
 		self.m_pkeys=re.compile(r',\s*(?:CONSTRAINT)?\s*`?\w*`?\s*PRIMARY\s*KEY\s*\((.*?)\)\s?', re.IGNORECASE)
 		self.m_ukeys=re.compile(r',\s*UNIQUE\s*KEY\s*`?\w*`?\s*\((.*?)\)\s*', re.IGNORECASE)
-		self.m_keys=re.compile(r',\s*(?:UNIQUE)?\s*(?:KEY|INDEX)\s*`?\w*`?\s*\((?:.*?)\)\s*', re.IGNORECASE)
+		self.m_keys=re.compile(r',\s*(?:UNIQUE|FULLTEXT)?\s*(?:KEY|INDEX)\s*`?\w*`?\s*\((?:.*?)\)\s*', re.IGNORECASE)
 		self.m_idx=re.compile(r',\s*(?:KEY|INDEX)\s*`?\w*`?\s*\((.*?)\)\s*', re.IGNORECASE)
 		self.m_fkeys=re.compile(r',\s*(?:CONSTRAINT)?\s*`?\w*`?\s*FOREIGN\s*KEY(?:\(?.*\(??)(?:\s*REFERENCES\s*`?\w*`)?(?:ON\s*(?:DELETE|UPDATE)\s*(?:RESTRICT|CASCADE)\s*)?', re.IGNORECASE)
 		self.m_inline_pkeys=re.compile(r'(.*?)\bPRIMARY\b\s*\bKEY\b', re.IGNORECASE)
@@ -46,6 +48,7 @@ class sql_token(object):
 		self.m_autoinc=re.compile(r'(AUTO_INCREMENT)', re.IGNORECASE)
 		
 		#re for query type
+		self.m_rename_table = re.compile(r'(RENAME\s*TABLE)\s*(.*)', re.IGNORECASE)
 		self.m_create_table = re.compile(r'(CREATE\s*TABLE)\s*(?:IF\s*NOT\s*EXISTS)?\s*(?:(?:`)?(?:\w*)(?:`)?\.)?(?:`)?(\w*)(?:`)?', re.IGNORECASE)
 		self.m_drop_table = re.compile(r'(DROP\s*TABLE)\s*(?:IF\s*EXISTS)?\s*(?:`)?(\w*)(?:`)?', re.IGNORECASE)
 		self.m_truncate_table = re.compile(r'(TRUNCATE)\s*(?:TABLE)?\s*(?:`)?(\w*)(?:`)?', re.IGNORECASE)
@@ -84,6 +87,7 @@ class sql_token(object):
 		colmatch = self.m_field.search(col_def)
 		dimmatch = self.m_dimension.search(col_def)
 		col_dic={}
+		dimensions = None
 		if colmatch:
 			col_dic["column_name"]=colmatch.group(1).strip("`").strip()
 			col_dic["data_type"]=colmatch.group(2).lower().strip()
@@ -117,6 +121,11 @@ class sql_token(object):
 				col_dic["extra"]="auto_increment"
 			else :
 				col_dic["extra"]=""
+			if dimensions:
+				col_dic["column_type"] = "%s(%s)" % (col_dic["data_type"], dimensions)
+			else:
+				col_dic["column_type"] = "%s" % (col_dic["data_type"])
+			
 		return col_dic
 		
 	def quote_cols(self, cols):
@@ -363,10 +372,33 @@ class sql_token(object):
 						try:
 							alter_dic["dimension"]=alter_column.group(3).replace('|', ',').strip()
 						except:
-							alter_dic["dimension"]=0
+							alter_dic["dimension"] = 0
+				if command != 'DROP':
+					alter_dic["data_type"] = alter_dic["type"]
+					if alter_dic["dimension"] == 0:
+						alter_dic["column_type"] = alter_dic["type"]
+					else:
+						alter_dic["column_type"] = "%s(%s)" % (alter_dic["type"], alter_dic["dimension"])
 				alter_cmd.append(alter_dic)
 			stat_dic["alter_cmd"]=alter_cmd
 		return stat_dic
+	
+	def parse_rename_table(self, rename_statement):
+		"""
+			The method parses the rename statements storing in a list the 
+			old and the new table name. 
+			
+			:param rename_statement: The statement string without the RENAME TABLE 
+			:return: rename_list, a list with the old/new table names inside
+			:rtype: list
+			
+		"""
+		rename_list = []
+		for rename in rename_statement.split(','):
+			mrename_items = self.m_rename_items.search(rename.strip())
+			if mrename_items:
+				rename_list.append([item.strip().replace('`', '') for item in mrename_items.groups()])
+		return rename_list
 		
 	def parse_sql(self, sql_string):
 		"""
@@ -378,7 +410,8 @@ class sql_token(object):
 			Parenthesis are surrounded by spaces and commas are rewritten in order to get at least one space after the comma.
 			The statement is then put on a single line and stripped.
 			
-			Six different match are performed on the statement.
+			Different match are performed on the statement.
+			RENAME TABLE
 			CREATE TABLE
 			DROP TABLE
 			ALTER TABLE
@@ -395,10 +428,8 @@ class sql_token(object):
 			
 			:param sql_string: The sql string with the sql statements.
 		"""
-		sql_string=re.sub(r'\s+default(.*?),', ' ', sql_string, re.IGNORECASE)
 		statements=sql_string.split(';')
 		for statement in statements:
-			
 			stat_dic={}
 			stat_cleanup=re.sub(r'/\*.*?\*/', '', statement, re.DOTALL)
 			stat_cleanup=re.sub(r'--.*?\n', '', stat_cleanup)
@@ -408,14 +439,22 @@ class sql_token(object):
 			stat_cleanup=stat_cleanup.replace('\n', ' ')
 			stat_cleanup = re.sub("\([\w*\s*]\)", " ",  stat_cleanup)
 			stat_cleanup = stat_cleanup.strip()
+			mrename_table = self.m_rename_table.match(stat_cleanup)
 			mcreate_table = self.m_create_table.match(stat_cleanup)
 			mdrop_table = self.m_drop_table.match(stat_cleanup)
 			malter_table = self.m_alter_table.match(stat_cleanup)
 			malter_index = self.m_alter_index.match(stat_cleanup)
 			mdrop_primary = self.m_drop_primary.match(stat_cleanup)
 			mtruncate_table = self.m_truncate_table.match(stat_cleanup)
-			
-			if mcreate_table:
+			if mrename_table:
+				rename_list = self.parse_rename_table(mrename_table.group(2))
+				for rename_table in rename_list:
+					stat_dic["command"] = "RENAME TABLE"
+					stat_dic["name"] = rename_table[0]
+					stat_dic["new_name"] = rename_table[1]
+					self.tokenised.append(stat_dic)
+					stat_dic = {}
+			elif mcreate_table:
 				command=' '.join(mcreate_table.group(1).split()).upper().strip()
 				stat_dic["command"]=command
 				stat_dic["name"]=mcreate_table.group(2)
@@ -442,4 +481,5 @@ class sql_token(object):
 				
 			if stat_dic!={}:
 				self.tokenised.append(stat_dic)
-		
+			
+			
