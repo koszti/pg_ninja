@@ -266,6 +266,8 @@ class mysql_engine:
 								inc_tables = pg_engine.get_inconsistent_tables()
 							
 						if write_ddl:
+							self.get_table_metadata()
+							pg_engine.table_metadata = self.my_tables
 							event_time = binlogevent.timestamp
 							if len(token)>0:
 								self.logger.debug("CAPTURED QUERY- binlogfile %s, position %s. Lenght group insert: %s \n Query: %s " % (binlogfile, binlogevent.packet.log_pos, grp_length, binlogevent.query))
