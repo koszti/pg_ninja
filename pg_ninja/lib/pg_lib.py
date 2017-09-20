@@ -1451,8 +1451,12 @@ class pg_engine:
 			try:
 				self.table_metadata[token["new_name"]]
 			except KeyError:
-				self.table_metadata[token["new_name"]] = self.table_metadata[token["name"]]
-			self.store_table(token["new_name"])
+				try:
+					self.table_metadata[token["new_name"]] = self.table_metadata[token["name"]]
+					self.store_table(token["new_name"])
+				except:
+					query = ""
+			
 		elif token["command"] =="DROP TABLE":
 			query=" %(command)s IF EXISTS \"%(name)s\" CASCADE;" % token
 		elif token["command"] =="TRUNCATE":
