@@ -929,11 +929,12 @@ class pg_engine:
 			indices=table["indices"]
 			table_idx=[]
 			for index in indices:
+				table_timestamp = str(int(time.time()))
 				indx=index["index_name"]
 				index_columns=index["index_columns"]
 				non_unique=index["non_unique"]
 				if indx=='PRIMARY':
-					pkey_name="pk_"+table_name[0:20]+"_"+str(self.idx_sequence)
+					pkey_name="pk_"+table_name[0:10]+"_"+table_timestamp+"_"+str(self.idx_sequence)
 					pkey_def='ALTER TABLE "'+table_name+'" ADD CONSTRAINT "'+pkey_name+'" PRIMARY KEY ('+index_columns+') ;'
 					table_idx.append(pkey_def)
 					if table_name in table_obf:
@@ -944,7 +945,7 @@ class pg_engine:
 						unique_key='UNIQUE'
 					else:
 						unique_key=''
-					index_name='"idx_'+indx[0:20]+table_name[0:20]+"_"+str(self.idx_sequence)+'"'
+					index_name = '"idx_' + indx[0:10] + table_name[0:10]+"_" + table_timestamp + "_"+str(self.idx_sequence)+'"'
 					idx_def='CREATE '+unique_key+' INDEX '+ index_name+' ON "'+table_name+'" ('+index_columns+');'
 					table_idx.append(idx_def)
 					if table_name in table_obf:
@@ -1445,8 +1446,14 @@ class pg_engine:
 	def gen_query(self, token):
 		""" the function generates the ddl"""
 		query=""
-		
-		if token["command"] =="DROP TABLE":
+		if token["command"] =="RENAME TABLE":
+			query = """ALTER TABLE "%s" RENAME TO "%s" """ % (token["name"], token["new_name"])	
+			try:
+				self.table_metadata[token["new_name"]]
+			except KeyError:
+				self.table_metadata[token["new_name"]] = self.table_metadata[token["name"]]
+			self.store_table(token["new_name"])
+		elif token["command"] =="DROP TABLE":
 			query=" %(command)s IF EXISTS \"%(name)s\" CASCADE;" % token
 		elif token["command"] =="TRUNCATE":
 			query=" %(command)s TABLE \"%(name)s\" CASCADE;" % token
