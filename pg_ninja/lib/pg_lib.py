@@ -1450,6 +1450,7 @@ class pg_engine:
 			query = """ALTER TABLE "%s" RENAME TO "%s" """ % (token["name"], token["new_name"])	
 			try:
 				self.table_metadata[token["new_name"]]
+				self.store_table(token["new_name"])
 			except KeyError:
 				try:
 					self.table_metadata[token["new_name"]] = self.table_metadata[token["name"]]
