@@ -788,7 +788,7 @@ class pg_engine:
 		for index in self.idx_ddl:
 			idx_ddl= self.idx_ddl[index]
 			for sql_idx in idx_ddl:
-				print sql_idx
+				self.logger.info("Executing %s " %(sql_idx))
 				self.pg_conn.pgsql_cur.execute(sql_idx)
 	
 	def refresh_indices(self):
@@ -796,7 +796,22 @@ class pg_engine:
 		for index in self.idx_ddl:
 			idx_ddl= self.idx_ddl[index]
 			for sql_idx in idx_ddl:
-				self.pg_conn.pgsql_cur.execute(sql_idx)
+				path_clear = "SET search_path=%s;" % self.pg_conn.dest_schema
+				path_obf = "SET search_path=%s;" % self.pg_conn.schema_obf
+				
+				sql_clear = "%s %s" %(path_clear , sql_idx)
+				sql_obf = "%s %s" %(path_clear , path_obf)
+				try:
+					self.logger.info("Executing %s on %s" %(sql_idx, self.pg_conn.dest_schema))
+					self.pg_conn.pgsql_cur.execute(sql_clear)
+				except psycopg2.Error as e:
+					self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
+				try:
+					self.logger.info("Executing %s on %s" %(sql_idx, self.pg_conn.schema_obf))
+					self.pg_conn.pgsql_cur.execute(sql_obf)
+				except psycopg2.Error as e:
+					self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
+				
 	
 	def reset_sequences(self, destination_schema):
 		""" method to reset the sequences to the max value available in table """
@@ -918,7 +933,7 @@ class pg_engine:
 		sql_path=" SET search_path=%s;" % (self.dest_schema, )
 		self.pg_conn.pgsql_cur.execute(sql_path)
 	
-	def build_idx_ddl(self, obfdic={}):
+	def build_idx_ddl(self, obfdic={}, timestamp_in_idx_name=False):
 		""" the function iterates over the list l_pkeys and builds a new list with the statements for pkeys """
 		if self.table_limit[0] != '*' :
 			table_metadata = {}
@@ -937,7 +952,10 @@ class pg_engine:
 			indices=table["indices"]
 			table_idx=[]
 			for index in indices:
-				table_timestamp = str(int(time.time()))
+				if timestamp_in_idx_name:
+					table_timestamp = str(int(time.time()))
+				else:
+					table_timestamp = "0"
 				indx=index["index_name"]
 				index_columns=index["index_columns"]
 				non_unique=index["non_unique"]
@@ -1478,7 +1496,7 @@ class pg_engine:
 			self.table_metadata={}
 			self.table_metadata[token["name"]]=table_metadata
 			self.build_tab_ddl()
-			self.build_idx_ddl()
+			self.build_idx_ddl({}, True)
 			query_type=' '.join(self.type_ddl[token["name"]])
 			query_table=self.table_ddl[token["name"]]
 			query_idx=' '.join(self.idx_ddl[token["name"]])
