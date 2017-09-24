@@ -649,3 +649,16 @@ class replica_engine(object):
 			tab_row = [source_name, dest_schema, obf_schema, source_status, read_lag, last_read,  replay_lag, last_replay]
 			tab_body.append(tab_row)
 		print(tabulate(tab_body, headers=tab_headers))
+
+	def refresh_indices(self, table):
+		"""
+			list the replica status using the configuration files and the replica catalogue
+		"""
+		if table != "*":
+			table_limit = table.split(',')
+			
+			self.my_eng.mysql_con.tables_limit = table_limit
+			self.my_eng.get_table_metadata()
+		self.pg_eng.build_tab_ddl()
+		self.pg_eng.build_idx_ddl(self.global_config.obfdic)
+		self.pg_eng.refresh_indices()

@@ -788,6 +788,14 @@ class pg_engine:
 		for index in self.idx_ddl:
 			idx_ddl= self.idx_ddl[index]
 			for sql_idx in idx_ddl:
+				print sql_idx
+				self.pg_conn.pgsql_cur.execute(sql_idx)
+	
+	def refresh_indices(self):
+		self.logger.info("trying to create the indices on schemas %s and %s" %(self.pg_conn.dest_schema, self.pg_conn.schema_obf))
+		for index in self.idx_ddl:
+			idx_ddl= self.idx_ddl[index]
+			for sql_idx in idx_ddl:
 				self.pg_conn.pgsql_cur.execute(sql_idx)
 	
 	def reset_sequences(self, destination_schema):
