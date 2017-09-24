@@ -659,6 +659,8 @@ class replica_engine(object):
 			
 			self.my_eng.mysql_con.tables_limit = table_limit
 			self.my_eng.get_table_metadata()
-		self.pg_eng.build_tab_ddl()
+		
+		self.pg_eng.set_source_id('initialising')
 		self.pg_eng.build_idx_ddl(self.global_config.obfdic)
 		self.pg_eng.refresh_indices()
+		self.pg_eng.set_source_id('initialised')
