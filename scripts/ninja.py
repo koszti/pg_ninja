@@ -20,7 +20,8 @@ commands = [
 	'stop_replica', 
 	'disable_replica', 
 	'enable_replica', 
-	'refresh_views'
+	'refresh_views', 
+	'refresh_indices'
 	]
 command_help = 'Available commands, ' + ','.join(commands)
 
@@ -75,6 +76,8 @@ if args.command in commands:
 		replica.enable_replica()
 	elif args.command == commands[14]:
 		replica.refresh_views(args.table)
+	elif args.command == commands[15]:
+		replica.refresh_indices(args.table)
 		
 
 else:
