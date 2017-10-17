@@ -8,7 +8,7 @@ from tabulate import tabulate
 from logging.handlers  import TimedRotatingFileHandler
 from distutils.sysconfig import get_python_lib
 from shutil import copy
-import threading
+from multiprocessing import Process
 
 class config_dir(object):
 	""" 
@@ -420,11 +420,7 @@ class replica_engine(object):
 
 	def read_replica(self):
 		while True:
-			try:
-				self.my_eng.run_replica(self.pg_eng)
-			except:
-				break
-			
+			self.my_eng.run_replica(self.pg_eng)
 			exit_request = self.check_file_exit()
 			if exit_request:
 				break
@@ -432,10 +428,7 @@ class replica_engine(object):
 			
 	def replay_replica(self):
 		while True:
-			try:
-				self.pg_eng.process_batch(self.global_config.replica_batch_size)
-			except:
-				break
+			self.pg_eng.process_batch(self.global_config.replica_batch_size)
 			exit_request = self.check_file_exit()
 			if exit_request:
 				break
@@ -452,33 +445,31 @@ class replica_engine(object):
 			print("** FATAL - The mysql configuration do not allow the replica.\n The parameters log_bin, binlog_format  and binlog_row_image are not set correctly.\n Check the documentation for further details.\n http://www.pgchameleon.org/documents/")
 			sys.exit()
 		already_running = self.check_running(write_pid=True)
-		exit_request = self.check_file_exit()
 		
 		if already_running:
 			sys.exit()
-		if exit_request:
-			self.pg_eng.set_source_id('stopped')
-			sys.exit()
+		
 		self.pg_eng.set_source_id('running')
-		read_replica = threading.Thread(target=self.read_replica, name='read_replica')
-		read_replica.setDaemon(True)
-		replay_replica = threading.Thread(target=self.replay_replica, name='replay_replica')
-		replay_replica.setDaemon(True)
+		read_replica = Process(target=self.read_replica, name='read_replica')
+		replay_replica = Process(target=self.replay_replica, name='replay_replica')
 		read_replica.start()
 		replay_replica.start()
 		while True:
-			read_alive = read_replica.isAlive()
-			replay_alive = replay_replica.isAlive()
-			self.logger.info("Read thread running: %s - Replay thread running: %s" %(read_alive, replay_alive))
-			if not read_alive and not replay_alive:
-				self.pg_eng.set_source_id('stopped')
+			read_alive = read_replica.is_alive()
+			replay_alive = replay_replica.is_alive()
+			if read_alive and replay_alive:
+				self.logger.info("Read thread running: %s - Replay thread running: %s" %(read_alive, replay_alive))
+				time.sleep(self.sleep_loop)
+			else:
+				read_exit = read_replica.exitcode
+				replay_exit = replay_replica.exitcode
+				if read_exit != 0 or replay_exit != 0:
+					read_replica.terminate()
+					replay_replica.terminate()
+					self.logger.error("The replica process crashed")
+					raise Exception('REPLICA CRASH!')
 				break
-			if (read_alive and not replay_alive) or (not read_alive and replay_alive):
-				self.stop_replica()
-				sys.exit(3)
-			time.sleep(self.sleep_loop)
-
-
+			
 
 
 
