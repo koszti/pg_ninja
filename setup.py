@@ -12,31 +12,26 @@ package_data = ('%s/pg_ninja' % python_lib, ['LICENSE'])
 	
 
 sql_up_path = 'sql/upgrade'
-conf_dir = "/%s/pg_ninja/config" % python_lib
+conf_dir = "/%s/pg_ninja/configuration" % python_lib
+conn_dir = "/%s/pg_ninja/connection" % python_lib
 sql_dir = "/%s/pg_ninja/sql" % python_lib
 sql_up_dir = "/%s/pg_ninja/%s" % (python_lib, sql_up_path)
 
 
 data_files = []
-conf_files = (
-		conf_dir, 
-		[
-			'config/config-example.yaml', 
-			'config/obfuscation-example.yaml', 
-			'config/snapshots-example.yaml'
-		]
-	)
+conf_files = (conf_dir, ['configuration/config-example.yml'])
+conn_files = (conn_dir, ['connection/connection-example.yml'])
 
 sql_src = ['sql/create_schema.sql', 'sql/drop_schema.sql']
 
 sql_upgrade = ["%s/%s" % (sql_up_path, file) for file in listdir(sql_up_path) if isfile(join(sql_up_path, file))]
 
 sql_files = (sql_dir,sql_src)
-sql_files = (sql_dir,sql_src)
 sql_up_files = (sql_up_dir,sql_upgrade)
 
 
 data_files.append(conf_files)
+data_files.append(conn_files)
 data_files.append(sql_files)
 data_files.append(sql_up_files)
 
@@ -44,9 +39,9 @@ data_files.append(sql_up_files)
 
 setup(
 	name="pg_ninja",
-	version="v1.0-alpha2",
-	description="MySQL to PostgreSQL replica and obfuscation",
-	long_description="""pg_ninja is a tool for replicating and obfuscating the data in real time from MySQL to PostgreSQL, compatible with Python 2.7.
+	version="v2.0-DEV",
+	description="MySQL to PostgreSQL replica and migration",
+	long_description=""" pg_ninja is a tool for replicating from MySQL to PostgreSQL compatible with Python 3.3+.
 The system use the library mysql-replication to pull the row images from MySQL which are transformed into a jsonb object. 
 A pl/pgsql function decodes the jsonb and replays the changes into the PostgreSQL database.
 
@@ -55,15 +50,17 @@ This is done by the tool running FLUSH TABLE WITH READ LOCK;  .
 
 pg_ninja can pull the data from a cascading replica when the MySQL slave is configured with log-slave-updates.
 
+The tool supports real time obfuscation.
 """,
-	author="Transferwise",
+
+	author="Transferwise LTD",
 	author_email="info@transferwise.com",
 	url="https://www.transferwise.com/",
+	license="BSD License",
 	platforms=[
 		"linux"
 	],
 	classifiers=[
-		
 		"Environment :: Console",
 		"Intended Audience :: Developers",
 		"Intended Audience :: Information Technology",
@@ -72,7 +69,11 @@ pg_ninja can pull the data from a cascading replica when the MySQL slave is conf
 		"Operating System :: POSIX :: BSD",
 		"Operating System :: POSIX :: Linux",
 		"Programming Language :: Python",
-		"Programming Language :: Python :: 2.7",
+		"Programming Language :: Python :: 3",
+		"Programming Language :: Python :: 3.3",
+		"Programming Language :: Python :: 3.4",
+		"Programming Language :: Python :: 3.5",
+		"Programming Language :: Python :: 3.6",
 		"Topic :: Database :: Database Engines/Servers",
 		"Topic :: Other/Nonlisted Topic"
 	],
@@ -81,23 +82,22 @@ pg_ninja can pull the data from a cascading replica when the MySQL slave is conf
 		"pg_ninja.lib.global_lib",
 		"pg_ninja.lib.mysql_lib",
 		"pg_ninja.lib.pg_lib",
-		"pg_ninja.lib.sql_util", 
-		"pg_ninja.lib.email_lib"
+		"pg_ninja.lib.sql_util"
 	],
 	scripts=[
-		"scripts/ninja.py"
+		"scripts/pgninja.py"
 	],
 	install_requires=[
 		'PyMySQL>=0.7.6', 
 		'argparse>=1.2.1', 
-		'mysql-replication>=0.13', 
+		'mysql-replication>=0.11', 
 		'psycopg2>=2.7.0', 
 		'PyYAML>=3.11', 
 		'tabulate>=0.7.7', 
-					
+		'daemonize>=2.4.7', 
+		'rollbar'
 	],
 	data_files = data_files, 
 	include_package_data = True
 	
 )
-
