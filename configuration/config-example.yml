@@ -48,7 +48,6 @@ sources:
         out_dir: /tmp
         sleep_loop: 1
 
-
 # type_override allows the user to override the default type conversion into a different one. 
 # override_to specifies the destination type which must be a postgresql type and the type cast should be possible
 # override_tables specifies which tables the override apply. If set to "*" then applies to all tables in the replicated schema
