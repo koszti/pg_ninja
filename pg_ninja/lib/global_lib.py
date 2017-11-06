@@ -211,6 +211,7 @@ class replica_engine(object):
 		elif self.args.tables != "*":
 			print("You cannot specify a table name when running init_replica.")
 		else:
+			self.stop_replica()
 			if self.args.debug:
 				self.mysql_source.init_replica()
 			else:
@@ -236,6 +237,7 @@ class replica_engine(object):
 		elif self.args.schema == "*":
 			print("You must specify an origin's schema name using the argument --schema")
 		else:
+			self.stop_replica()
 			if self.args.debug:
 				self.mysql_source.refresh_schema()
 			else:
@@ -262,6 +264,7 @@ class replica_engine(object):
 		elif self.args.tables == "*":
 			print("You must specify one or more tables, in the form schema.table, separated by comma using the argument --tables")
 		else:
+			self.stop_replica()
 			if self.args.debug:
 				self.mysql_source.sync_tables()
 			else:
@@ -305,8 +308,20 @@ class replica_engine(object):
 		"""
 			The method replays the row images stored in the target postgresql database.
 		"""
+		tables_error  = []
+		self.pg_engine.connect_db()
+		self.pg_engine.set_source_id()
 		while True:
 			self.logger.info("Replaying data changes for source %s " % (self.args.source))
+			tables_error = self.pg_engine.replay_replica()
+			if len(tables_error) > 0:
+				table_list = [item for sublist in tables_error for item in sublist]
+				tables_removed = "\n".join(table_list)
+				error_msg = "There was an error during the replay of data. %s. The affected tables are no longer replicated." % (tables_removed)
+				self.logger.error(error_msg)
+				if self.config["rollbar_key"] !='' and self.config["rollbar_env"] != '':
+					rollbar.init(self.config["rollbar_key"], self.config["rollbar_env"])  
+					rollbar.report_message(error_msg, 'error')
 			time.sleep(self.sleep_loop)
 			
 	def run_replica(self):
@@ -386,7 +401,13 @@ class replica_engine(object):
 				pid=file_pid.read()
 				file_pid.close()
 				os.kill(int(pid),2)
-				print("Replica process signalled to stop")
+				print("Requesting the replica to stop")
+				while True:
+					try:
+						os.kill(int(pid),0)
+					except:
+						break
+				print("The replica process is stopped")
 			except:
 				print("An error occurred when trying to signal the replica process")
 		else:

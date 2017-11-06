@@ -1,2 +1,2 @@
 --drop schema
-DROP SCHEMA IF EXISTS sch_ninja_v2 CASCADE;
+DROP SCHEMA IF EXISTS sch_ninja CASCADE;

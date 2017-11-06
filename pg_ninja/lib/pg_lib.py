@@ -136,7 +136,7 @@ class pg_engine(object):
 	
 	def create_replica_schema(self):
 		"""
-			The method installs the replica schema sch_chameleon if not already  present.
+			The method installs the replica schema sch_ninja if not already  present.
 		"""
 		self.logger.debug("Trying to connect to the destination database.")
 		self.connect_db()
@@ -168,7 +168,7 @@ class pg_engine(object):
 				t_binlog_name,
 				i_binlog_position
 			FROM
-				sch_ninja_v2.t_replica_tables
+				sch_ninja.t_replica_tables
 			WHERE
 				t_binlog_name IS NOT NULL
 				AND i_binlog_position IS NOT NULL
@@ -187,6 +187,37 @@ class pg_engine(object):
 			inc_dic[table[1]] = tab_dic
 		return inc_dic
 	
+	def replay_replica(self):
+		"""
+			The method replays the row images in the target database using the function 
+			fn_replay_mysql. The function returns a composite type.
+			The first element is a boolean flag which
+			is true if the batch still require replay. it's false if it doesn't.
+			In that case the while loop ends.
+			The second element is a, optional list of table names. If any table cause error during the replay
+			the problem is captured and the table is removed from the replica. Then the name is returned by
+			the function. As the function can find multiple tables with errors during a single replay run, the 
+			table names are stored in a list (Actually is a postgres array, see the create_schema.sql file for more details).
+			 
+			 Each batch which is looped trough can also find multiple tables so we return a list of lists to the replica_engine's
+			 calling method.
+			
+		"""
+		tables_error = []
+		continue_loop = True
+		self.source_config = self.sources[self.source]
+		self.replica_batch_size = self.source_config["replica_batch_size"]
+		while continue_loop:
+			sql_replay = """SELECT * FROM sch_ninja.fn_replay_mysql(%s,%s)""";
+			self.pgsql_cur.execute(sql_replay, (self.replica_batch_size, self.i_id_source, ))
+			replay_status = self.pgsql_cur.fetchone()
+			self.logger.debug("Replay status %s" % replay_status[0])
+			continue_loop = replay_status[0]
+			if replay_status[1]:
+				tables_error.append(replay_status[1])
+		return tables_error
+			
+	
 	def set_consistent_table(self, table, schema):
 		"""
 			The method set to NULL the  binlog name and position for the given table.
@@ -195,7 +226,7 @@ class pg_engine(object):
 			:param table: the table name
 		"""
 		sql_set = """
-			UPDATE sch_ninja_v2.t_replica_tables
+			UPDATE sch_ninja.t_replica_tables
 				SET 
 					t_binlog_name = NULL,
 					i_binlog_position = NULL
@@ -207,7 +238,32 @@ class pg_engine(object):
 		"""
 		self.pgsql_cur.execute(sql_set, (self.i_id_source, table, schema))
 	
-	
+	def get_table_pkey(self, schema, table):
+		"""
+			The method queries the table sch_ninja.t_replica_tables and gets the primary key 
+			associated with the table, if any.
+			If there is no primary key the method returns None
+			
+			:param schema: The table schema
+			:param table: The table name
+			:return: the primary key associated with the table
+			:rtype: list
+			
+		"""
+		sql_pkey = """
+			SELECT 
+				v_table_pkey
+			FROM
+				sch_ninja.t_replica_tables
+			WHERE
+					v_schema_name=%s
+				AND	v_table_name=%s
+			;
+		"""
+		self.pgsql_cur.execute(sql_pkey, (schema, table, ))
+		table_pkey = self.pgsql_cur.fetchone()
+		return table_pkey[0]
+		
 	def generate_ddl(self, token,  destination_schema):
 		""" 
 			The method builds the DDL using the tokenised SQL stored in token.
@@ -227,22 +283,16 @@ class pg_engine(object):
 		"""
 		query=""
 		if token["command"] =="RENAME TABLE":
-			query = """ALTER TABLE "%s"."%s" RENAME TO "%s" """ % (destination_schema, token["name"], token["new_name"])	
-			try:
-				self.table_metadata[token["new_name"]]
-				self.store_table(token["new_name"])
-			except KeyError:
-				try:
-					self.table_metadata[token["new_name"]] = self.table_metadata[token["name"]]
-					self.store_table(token["new_name"])
-				except KeyError:
-					query = ""
-			
-		elif token["command"] =="DROP TABLE":
+			old_name = token["name"]
+			new_name = token["new_name"]
+			query = """ALTER TABLE "%s"."%s" RENAME TO "%s" """ % (destination_schema, old_name, new_name)	
+			table_pkey = self.get_table_pkey(destination_schema, old_name)
+			if table_pkey:
+				self.store_table(destination_schema, new_name, table_pkey, None)
+		elif token["command"] == "DROP TABLE":
 			query=""" DROP TABLE IF EXISTS "%s"."%s";""" % (destination_schema, token["name"])	
-		elif token["command"] =="TRUNCATE":
+		elif token["command"] == "TRUNCATE":
 			query=""" TRUNCATE TABLE "%s"."%s" CASCADE;""" % (destination_schema, token["name"])	
-			
 		elif token["command"] =="CREATE TABLE":
 			table_metadata = token["columns"]
 			table_name = token["name"]
@@ -255,19 +305,252 @@ class pg_engine(object):
 			table_indices = ''.join([val for key ,val in index_ddl[1].items()])
 			self.store_table(destination_schema, table_name, table_pkey, None)
 			query = "%s %s %s " % (table_enum, table_statement,  table_indices)
-			print(query)
-			#query_type=' '.join(self.type_ddl[token["name"]])
-			#query_table=self.table_ddl[token["name"]]
-			#query_idx=' '.join(self.idx_ddl[token["name"]])
-			#query=query_type+query_table+query_idx
-			#self.store_table(token["name"])
 		elif token["command"] == "ALTER TABLE":
-			query=self.build_alter_table(token)
+			query=self.build_alter_table(destination_schema, token)
 		elif token["command"] == "DROP PRIMARY KEY":
-			self.drop_primary_key(token)
+			self.drop_primary_key(destination_schema, token)
 		return query 
 
+	def build_enum_ddl(self, schema, enm_dic):
+		"""
+			The method builds the enum DDL using the token data. 
+			The postgresql system catalog  is queried to determine whether the enum exists and needs to be altered.
+			The alter is not written in the replica log table but executed as single statement as PostgreSQL do not allow the alter being part of a multi command
+			SQL.
+			
+			:param schema: the schema where the enumeration is present
+			:param enm_dic: a dictionary with the enumeration details
+			:return: a dictionary with the pre_alter and post_alter statements (e.g. pre alter create type , post alter drop type)
+			:rtype: dictionary
+		"""
+		enum_name="enum_%s_%s" % (enm_dic['table'], enm_dic['column'])
+		
+		sql_check_enum = """
+			SELECT 
+				typ.typcategory,
+				typ.typname,
+				sch_typ.nspname as typschema,
+				CASE 
+					WHEN typ.typcategory='E'
+					THEN
+					(
+						SELECT 
+							array_agg(enumlabel) 
+						FROM 
+							pg_enum 
+						WHERE 
+							enumtypid=typ.oid
+					)
+				END enum_list
+			FROM
+				pg_type typ
+				INNER JOIN pg_namespace sch_typ
+					ON  sch_typ.oid = typ.typnamespace
 
+			WHERE
+					sch_typ.nspname=%s
+				AND	typ.typname=%s
+			;
+		"""
+		self.pgsql_cur.execute(sql_check_enum, (schema,  enum_name))
+		type_data=self.pgsql_cur.fetchone()
+		return_dic = {}
+		pre_alter = ""
+		post_alter = ""
+		column_type = enm_dic["type"]
+		self.logger.debug(enm_dic)
+		if type_data:
+			if type_data[0] == 'E' and enm_dic["type"] == 'enum':
+				self.logger.debug('There is already the enum %s, altering the type')
+				new_enums = [val.strip() for val in enm_dic["enum_list"] if val.strip() not in type_data[3]]
+				sql_add = []
+				for enumeration in  new_enums:
+					sql_add =  """ALTER TYPE "%s"."%s" ADD VALUE '%s';""" % (type_data[2], enum_name, enumeration) 
+					self.pgsql_cur.execute(sql_add)
+				
+			elif type_data[0] != 'E' and enm_dic["type"] == 'enum':
+				self.logger.debug('The column will be altered in enum, creating the type')
+				pre_alter = """CREATE TYPE "%s"."%s" AS ENUM (%s);""" % (schema,enum_name, enm_dic["enum_elements"])
+				
+			elif type_data[0] == 'E' and enm_dic["type"] != 'enum':
+				self.logger.debug('The column is no longer an enum, dropping the type')
+				post_alter = """DROP TYPE "%s"."%s"; """ % (schema,enum_name)
+			column_type = """ "%s"."%s" """ % (schema, enum_name)
+		elif not type_data and enm_dic["type"] == 'enum':
+				self.logger.debug('Creating a new enumeration type %s' % (enum_name))
+				pre_alter = """CREATE TYPE "%s"."%s" AS ENUM (%s);""" % (schema,enum_name, enm_dic["enum_elements"])
+				column_type = """ "%s"."%s" """ % (schema, enum_name)
+
+		return_dic["column_type"] = column_type
+		return_dic["pre_alter"] = pre_alter
+		return_dic["post_alter"]  = post_alter
+		return return_dic
+	
+
+	def build_alter_table(self, schema, token):
+		""" 
+			The method builds the alter table statement from the token data.
+			The function currently supports the following statements.
+			DROP TABLE
+			ADD COLUMN 
+			CHANGE
+			MODIFY
+			
+			The change and modify are potential source of breakage for the replica because of 
+			the mysql implicit fallback data types. 
+			For better understanding please have a look to 
+			
+			http://www.cybertec.at/why-favor-postgresql-over-mariadb-mysql/
+			
+			:param schema: The schema where the affected table is stored on postgres.
+			:param token: A dictionary with the tokenised sql statement
+			:return: query the DDL query in the PostgreSQL dialect
+			:rtype: string
+			
+		"""
+		alter_cmd = []
+		ddl_pre_alter = []
+		ddl_post_alter = []
+		query_cmd=token["command"]
+		table_name=token["name"]
+		
+		for alter_dic in token["alter_cmd"]:
+			if alter_dic["command"] == 'DROP':
+				alter_cmd.append("%(command)s %(name)s CASCADE" % alter_dic)
+			elif alter_dic["command"] == 'ADD':
+				
+				column_type=self.get_data_type(alter_dic, schema, table_name)
+				column_name = alter_dic["name"]
+				enum_list = str(alter_dic["dimension"]).replace("'", "").split(",")
+				enm_dic = {'table':table_name, 'column':column_name, 'type':column_type, 'enum_list': enum_list, 'enum_elements':alter_dic["dimension"]}
+				enm_alter = self.build_enum_ddl(schema, enm_dic)
+				ddl_pre_alter.append(enm_alter["pre_alter"])
+				ddl_post_alter.append(enm_alter["post_alter"])
+				column_type= enm_alter["column_type"]
+				if 	column_type in ["character varying", "character", 'numeric', 'bit', 'float']:
+						column_type=column_type+"("+str(alter_dic["dimension"])+")"
+				if alter_dic["default"]:
+					default_value = "DEFAULT %s" % alter_dic["default"]
+				else:
+					default_value=""
+				alter_cmd.append("%s \"%s\" %s NULL %s" % (alter_dic["command"], column_name, column_type, default_value))	
+			elif alter_dic["command"] == 'CHANGE':
+				sql_rename = ""
+				sql_type = ""
+				old_column=alter_dic["old"]
+				new_column=alter_dic["new"]
+				column_name = old_column
+				enum_list = str(alter_dic["dimension"]).replace("'", "").split(",")
+				
+				column_type=self.get_data_type(alter_dic, schema, table_name)
+				default_sql = self.generate_default_statements(schema, table_name, old_column, new_column)
+				enm_dic = {'table':table_name, 'column':column_name, 'type':column_type, 'enum_list': enum_list, 'enum_elements':alter_dic["dimension"]}
+				enm_alter = self.build_enum_ddl(schema, enm_dic)
+
+				ddl_pre_alter.append(enm_alter["pre_alter"])
+				ddl_pre_alter.append(default_sql["drop"])
+				ddl_post_alter.append(enm_alter["post_alter"])
+				ddl_post_alter.append(default_sql["create"])
+				column_type= enm_alter["column_type"]
+				
+				if column_type=="character varying" or column_type=="character" or column_type=='numeric' or column_type=='bit' or column_type=='float':
+						column_type=column_type+"("+str(alter_dic["dimension"])+")"
+				sql_type = """ALTER TABLE "%s"."%s" ALTER COLUMN "%s" SET DATA TYPE %s  USING "%s"::%s ;;""" % (schema, table_name, old_column, column_type, old_column, column_type)
+				if old_column != new_column:
+					sql_rename="""ALTER TABLE "%s"."%s" RENAME COLUMN "%s" TO "%s" ;""" % (schema, table_name, old_column, new_column)
+					
+				query = ' '.join(ddl_pre_alter)
+				query += sql_type+sql_rename
+				query += ' '.join(ddl_post_alter)
+				return query
+
+			elif alter_dic["command"] == 'MODIFY':
+				column_type=self.get_data_type(alter_dic, schema, table_name)
+				column_name = alter_dic["name"]
+				
+				enum_list = str(alter_dic["dimension"]).replace("'", "").split(",")
+				default_sql = self.generate_default_statements(schema, table_name, column_name)
+				enm_dic = {'table':table_name, 'column':column_name, 'type':column_type, 'enum_list': enum_list, 'enum_elements':alter_dic["dimension"]}
+				enm_alter = self.build_enum_ddl(schema, enm_dic)
+
+				ddl_pre_alter.append(enm_alter["pre_alter"])
+				ddl_pre_alter.append(default_sql["drop"])
+				ddl_post_alter.append(enm_alter["post_alter"])
+				ddl_post_alter.append(default_sql["create"])
+				column_type= enm_alter["column_type"]
+				if column_type=="character varying" or column_type=="character" or column_type=='numeric' or column_type=='bit' or column_type=='float':
+						column_type=column_type+"("+str(alter_dic["dimension"])+")"
+				query = ' '.join(ddl_pre_alter)
+				query +=  """ALTER TABLE "%s"."%s" ALTER COLUMN "%s" SET DATA TYPE %s USING "%s"::%s ;""" % (schema, table_name, column_name, column_type, column_name, column_type)
+				query += ' '.join(ddl_post_alter)
+				return query
+		query = ' '.join(ddl_pre_alter)
+		query +=  """%s "%s"."%s" %s;""" % (query_cmd , schema,  table_name,', '.join(alter_cmd))
+		query += ' '.join(ddl_post_alter)
+		return query
+
+	
+	def drop_primary_key(self, schema, token):
+		"""
+			The method drops the primary key for the table.
+			As tables without primary key cannot be replicated the method calls unregister_table
+			to remove the table from the replica set.
+			The drop constraint statement is not built from the token but generated from the information_schema.
+			
+			:param schema: The table's schema
+			:param token: the tokenised query for drop primary key
+		"""
+		self.logger.info("dropping primary key for table %s.%s" % (schema, token["name"],))
+		sql_gen="""
+			SELECT  DISTINCT
+				format('ALTER TABLE %%I.%%I DROP CONSTRAINT %%I;',
+				table_schema,
+				table_name,
+				constraint_name
+				)
+			FROM 
+				information_schema.key_column_usage 
+			WHERE 
+					table_schema=%s 
+				AND table_name=%s
+			;
+		"""
+		self.pgsql_cur.execute(sql_gen, (schema, token["name"]))
+		value_check=self.pgsql_cur.fetchone()
+		if value_check:
+			sql_drop=value_check[0]
+			self.pgsql_cur.execute(sql_drop)
+			self.unregister_table(schema, token["name"])
+
+	def unregister_table(self, schema,  table):
+		"""
+			This method is used to remove a table from the replica catalogue.
+			The table is just deleted from the table sch_ninja.t_replica_tables.
+			
+			:param schema: the schema name where the table is stored
+			:param table: the table name to remove from t_replica_tables
+		"""
+		self.logger.info("unregistering table %s.%s from the replica catalog" % (schema, table,))
+		sql_delete=""" DELETE FROM sch_ninja.t_replica_tables 
+					WHERE
+							v_table_name=%s
+						AND	v_schema_name=%s
+					;
+						"""
+		self.pgsql_cur.execute(sql_delete, (table, schema))	
+	
+	def cleanup_source_tables(self):
+		"""
+			The method cleans up the tables for active source in sch_ninja.t_replica_tables.
+			
+		"""
+		self.logger.info("deleting all the table references from the replica catalog for source %s " % (self.source,))
+		sql_delete=""" DELETE FROM sch_ninja.t_replica_tables 
+					WHERE
+						i_id_source=%s
+					;
+						"""
+		self.pgsql_cur.execute(sql_delete, (self.i_id_source, ))	
 	
 	def write_ddl(self, token, query_data, table_metadata, destination_schema):
 		"""
@@ -289,7 +572,7 @@ class pg_engine(object):
 				pg_ddl
 			)
 		sql_insert=sql.SQL("""
-			INSERT INTO "sch_chameleon".{}
+			INSERT INTO "sch_ninja".{}
 				(
 					i_id_batch, 
 					v_table_name, 
@@ -329,13 +612,13 @@ class pg_engine(object):
 					SELECT 
 						max(ts_created) AS ts_created
 					FROM 
-						sch_ninja_v2.t_replica_batch  
+						sch_ninja.t_replica_batch  
 					WHERE 
 							NOT b_processed
 						AND	NOT b_replayed
 						AND	i_id_source=%s
 				)
-			UPDATE sch_ninja_v2.t_replica_batch
+			UPDATE sch_ninja.t_replica_batch
 			SET 
 				b_started=True
 			FROM 
@@ -347,7 +630,7 @@ class pg_engine(object):
 				i_id_batch,
 				t_binlog_name,
 				i_binlog_position,
-				(SELECT v_log_table[1] from sch_ninja_v2.t_sources WHERE i_id_source=%s) as v_log_table
+				(SELECT v_log_table[1] from sch_ninja.t_sources WHERE i_id_source=%s) as v_log_table
 				
 			;
 		"""
@@ -369,7 +652,7 @@ class pg_engine(object):
 	
 	def check_replica_schema(self):
 		"""
-			The method checks if the sch_chameleon exists
+			The method checks if the sch_ninja exists
 			
 			:return: count from information_schema.schemata
 			:rtype: integer
@@ -380,7 +663,7 @@ class pg_engine(object):
 			FROM 
 				information_schema.schemata  
 			WHERE 
-				schema_name='sch_chameleon'
+				schema_name='sch_ninja'
 		"""
 			
 		self.pgsql_cur.execute(sql_check)
@@ -389,7 +672,7 @@ class pg_engine(object):
 	
 	def check_schema_mappings(self, exclude_current_source=False):
 		"""
-			:param exclude_current_source: If set to true the check excludes the current source name from the check.
+			
 			The default is false. 
 		
 			The method checks if there is already a destination schema in the stored schema mappings.
@@ -400,6 +683,8 @@ class pg_engine(object):
 			The method returns a list or none. 
 			If the list is returned then contains the count and the destination schema name 
 			that are already present in the replica catalogue.
+			
+			:param exclude_current_source: If set to true the check excludes the current source name from the check.
 			:return: the schema already mapped in the replica catalogue. 
 			:rtype: list
 		"""
@@ -412,27 +697,28 @@ class pg_engine(object):
 			WITH t_check  AS
 			(
 					SELECT 
-						(jsonb_each_text(jsb_schema_mappings)).value AS dest_schema
+						(json_each_text((jsonb_each_text(jsb_schema_mappings)).value::json)).value AS dest_schema
 					FROM 
-						sch_ninja_v2.t_sources
+						sch_ninja.t_sources
 					WHERE 
 						i_id_source <> %s
 				UNION ALL
-					SELECT 
-						value AS dest_schema 
+					SELECT DISTINCT
+						(json_each_text(value::json)).value
 					FROM 
 						json_each_text(%s::json) 
+
 			)
-		SELECT 
-			count(dest_schema),
-			dest_schema 
-		FROM 
-			t_check 
-		GROUP BY 
-			dest_schema
-		HAVING 
-			count(dest_schema)>1
-		;
+			SELECT 
+				count(dest_schema),
+				dest_schema 
+			FROM 
+				t_check 
+			GROUP BY 
+				dest_schema
+			HAVING 
+				count(dest_schema)>1
+			;
 		"""
 		self.pgsql_cur.execute(sql_check, (exclude_id, schema_mappings, ))
 		check_mappings = self.pgsql_cur.fetchone()
@@ -450,7 +736,7 @@ class pg_engine(object):
 			SELECT 
 				count(*) 
 			FROM 
-				sch_ninja_v2.t_sources 
+				sch_ninja.t_sources 
 			WHERE 
 				t_source=%s;
 		"""
@@ -478,7 +764,7 @@ class pg_engine(object):
 				log_table_1 = "t_log_replica_%s_1" % self.source
 				log_table_2 = "t_log_replica_%s_2" % self.source
 				sql_add = """
-					INSERT INTO sch_ninja_v2.t_sources 
+					INSERT INTO sch_ninja.t_sources 
 						( 
 							t_source,
 							jsb_schema_mappings,
@@ -494,7 +780,7 @@ class pg_engine(object):
 				"""
 				self.pgsql_cur.execute(sql_add, (self.source, schema_mappings, log_table_1, log_table_2))
 				
-				sql_parts = """SELECT sch_ninja_v2.fn_refresh_parts() ;"""
+				sql_parts = """SELECT sch_ninja.fn_refresh_parts() ;"""
 				self.pgsql_cur.execute(sql_parts)
 				self.insert_source_timings()
 		else:
@@ -509,25 +795,25 @@ class pg_engine(object):
 		self.connect_db()
 		num_sources = self.check_source()
 		if num_sources == 1:
-			sql_delete = """ DELETE FROM sch_ninja_v2.t_sources 
+			sql_delete = """ DELETE FROM sch_ninja.t_sources 
 						WHERE  t_source=%s
 						RETURNING v_log_table
 						; """
 			self.pgsql_cur.execute(sql_delete, (self.source, ))
 			source_drop = self.pgsql_cur.fetchone()
 			for log_table in source_drop[0]:
-				sql_drop = """DROP TABLE sch_ninja_v2."%s"; """ % (log_table)
+				sql_drop = """DROP TABLE sch_ninja."%s"; """ % (log_table)
 				try:
 					self.pgsql_cur.execute(sql_drop)
 				except:
-					self.logger.debug("Could not drop the table sch_ninja_v2.%s you may need to remove it manually." % log_table)
+					self.logger.debug("Could not drop the table sch_ninja.%s you may need to remove it manually." % log_table)
 		else:
 			self.logger.debug("There is no source %s registered in the replica catalogue" % self.source)
 			
 	def get_schema_list(self):
 		"""
 			The method gets the list of source schemas for the given source.
-			The list is generated using the mapping in sch_ninja_v2.t_sources. 
+			The list is generated using the mapping in sch_ninja.t_sources. 
 			Any change in the configuration file is ignored
 			The method assumes there is a database connection active.
 		"""
@@ -536,7 +822,7 @@ class pg_engine(object):
 			SELECT 
 				(jsonb_each_text(jsb_schema_mappings)).key
 			FROM 
-				sch_ninja_v2.t_sources
+				sch_ninja.t_sources
 			WHERE 
 				t_source=%s;
 			
@@ -664,10 +950,10 @@ class pg_engine(object):
 				
 				
 			FROM 
-				sch_ninja_v2.t_sources src
-				LEFT JOIN sch_ninja_v2.t_last_received rec
+				sch_ninja.t_sources src
+				LEFT JOIN sch_ninja.t_last_received rec
 				ON	src.i_id_source = rec.i_id_source
-				LEFT JOIN sch_ninja_v2.t_last_replayed rep
+				LEFT JOIN sch_ninja.t_last_replayed rep
 				ON	src.i_id_source = rep.i_id_source
 			;
 			
@@ -685,7 +971,7 @@ class pg_engine(object):
 		"""
 		self.set_source_id()
 		sql_replay = """
-			INSERT INTO sch_ninja_v2.t_last_replayed
+			INSERT INTO sch_ninja.t_last_replayed
 				(
 					i_id_source
 				)
@@ -700,7 +986,7 @@ class pg_engine(object):
 			;
 		"""
 		sql_receive = """
-			INSERT INTO sch_ninja_v2.t_last_received
+			INSERT INTO sch_ninja.t_last_received
 				(
 					i_id_source
 				)
@@ -716,7 +1002,53 @@ class pg_engine(object):
 		"""
 		self.pgsql_cur.execute(sql_replay, (self.i_id_source, ))
 		self.pgsql_cur.execute(sql_receive, (self.i_id_source, ))
-	
+
+	def  generate_default_statements(self, schema,  table, column, create_column=None):
+		"""
+			The method gets the default value associated with the table and column removing the cast.
+			:param schema: The schema name
+			:param table: The table name
+			:param column: The column name
+			:return: the statements for dropping and creating default value on the affected table
+			:rtype: dictionary
+		"""
+		if not create_column:
+			create_column = column
+		
+		regclass = """ "%s"."%s" """ %(schema, table)
+		sql_def_val = """
+			SELECT 
+				(
+					SELECT 
+						split_part(substring(pg_catalog.pg_get_expr(d.adbin, d.adrelid) for 128),'::',1)
+					FROM 
+						pg_catalog.pg_attrdef d
+					WHERE 
+							d.adrelid = a.attrelid 
+						AND d.adnum = a.attnum 
+						AND a.atthasdef
+				) as default_value
+				FROM 
+					pg_catalog.pg_attribute a
+				WHERE 
+						a.attrelid = %s::regclass 
+					AND a.attname=%s 
+					AND NOT a.attisdropped
+			;
+
+		"""
+		self.pgsql_cur.execute(sql_def_val, (regclass, column ))
+		default_value = self.pgsql_cur.fetchone()
+		query_drop_default = ""
+		query_add_default = ""
+
+		if default_value:
+			query_drop_default = """ ALTER TABLE  "%s"."%s" ALTER COLUMN "%s" DROP DEFAULT;""" % (schema, table, column)
+			query_add_default = """ ALTER TABLE  "%s"."%s" ALTER COLUMN "%s" SET DEFAULT %s ; """ % (schema, table, create_column, default_value[0])
+		
+		return {'drop':query_drop_default, 'create':query_add_default}
+
+
 	def get_data_type(self, column, schema,  table):
 		""" 
 			The method determines whether the specified type has to be overridden or not.
@@ -770,18 +1102,18 @@ class pg_engine(object):
 		insert_list=[]
 		for row_data in group_insert:
 			global_data=row_data["global_data"]
-			event_data=row_data["event_data"]
-			event_update=row_data["event_update"]
+			event_after=row_data["event_after"]
+			event_before=row_data["event_before"]
 			log_table=global_data["log_table"]
-			insert_list.append(self.pg_conn.pgsql_cur.mogrify("%s,%s,%s,%s,%s,%s,%s,%s,%s" ,  (
+			insert_list.append(self.pgsql_cur.mogrify("%s,%s,%s,%s,%s,%s,%s,%s,%s" ,  (
 						global_data["batch_id"], 
 						global_data["table"],  
-						self.dest_schema, 
+						global_data["schema"], 
 						global_data["action"], 
 						global_data["binlog"], 
 						global_data["logpos"], 
-						json.dumps(event_data, cls=pg_encoder), 
-						json.dumps(event_update, cls=pg_encoder), 
+						json.dumps(event_after, cls=pg_encoder), 
+						json.dumps(event_before, cls=pg_encoder), 
 						global_data["event_time"], 
 						
 					)
@@ -792,9 +1124,8 @@ class pg_engine(object):
 		csv_file.write(csv_data)
 		csv_file.seek(0)
 		try:
-			
-			sql_copy="""
-				COPY "sch_chameleon"."""+log_table+""" 
+			sql_copy=sql.SQL("""
+				COPY "sch_ninja".{}
 					(
 						i_id_batch, 
 						v_table_name, 
@@ -802,8 +1133,8 @@ class pg_engine(object):
 						enm_binlog_event, 
 						t_binlog_name, 
 						i_binlog_position, 
-						jsb_event_data,
-						jsb_event_update,
+						jsb_event_after,
+						jsb_event_before,
 						i_my_event_time
 					) 
 				FROM 
@@ -813,14 +1144,105 @@ class pg_engine(object):
 					DELIMITER ',' 
 					ESCAPE '''' 
 				;
-			"""
-			self.pg_conn.pgsql_cur.copy_expert(sql_copy,csv_file)
+			""").format(sql.Identifier(log_table))
+			self.pgsql_cur.copy_expert(sql_copy,csv_file)
 		except psycopg2.Error as e:
 			self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
-			self.logger.error(csv_data)
 			self.logger.error("fallback to inserts")
 			self.insert_batch(group_insert)
 		self.set_application_name("idle")
+	
+	def insert_batch(self,group_insert):
+		"""
+			Fallback method for the batch insert. Each row event is processed
+			individually and any problematic row is discarded into the table t_discarded_rows.
+			The row is encoded in base64 in order to prevent any encoding or type issue.
+			
+			:param group_insert: the event data built in mysql_engine
+		"""
+		
+		self.logger.debug("starting insert loop")
+		for row_data in group_insert:
+			global_data = row_data["global_data"]
+			event_after= row_data["event_after"]
+			event_before= row_data["event_before"]
+			log_table = global_data["log_table"]
+			event_time = global_data["event_time"]
+			sql_insert=sql.SQL("""
+				INSERT INTO sch_ninja.{}
+					(
+						i_id_batch, 
+						v_table_name, 
+						v_schema_name, 
+						enm_binlog_event, 
+						t_binlog_name, 
+						i_binlog_position, 
+						jsb_event_after,
+						jsb_event_before,
+						i_my_event_time
+					)
+					VALUES 
+						(
+							%s,
+							%s,
+							%s,
+							%s,
+							%s,
+							%s,
+							%s,
+							%s,
+							%s
+						)
+				;						
+			""").format(sql.Identifier(log_table))
+			try:
+				self.pgsql_cur.execute(sql_insert,(
+						global_data["batch_id"], 
+						global_data["table"],  
+						global_data["schema"], 
+						global_data["action"], 
+						global_data["binlog"], 
+						global_data["logpos"], 
+						json.dumps(event_after, cls=pg_encoder), 
+						json.dumps(event_before, cls=pg_encoder), 
+						event_time
+					)
+				)
+			except:
+				self.logger.error("error when storing event data. saving the discarded row")
+				self.save_discarded_row(row_data,global_data["batch_id"])
+
+	def save_discarded_row(self,row_data,batch_id):
+		"""
+			The method saves the discarded row in the table t_discarded_row along with the id_batch.
+			The row is encoded in base64 as the t_row_data is a text field.
+			
+			:param row_data: the row data dictionary
+			:param batch_id: the id batch where the row belongs
+		"""
+		byte_data = "%b" % row_data
+		b64_row=base64.b64encode(byte_data)
+		schema = row_data["schema"]
+		table  = row_data["table"]
+		print(b64_row)
+		sql_save="""
+			INSERT INTO sch_ninja.t_discarded_rows
+				(
+					i_id_batch, 
+					v_schema_name,
+					v_table_name,
+					t_row_data
+				)
+			VALUES 
+				(
+					%s,
+					%s,
+					%s,
+					%s
+				);
+		"""
+		self.pgsql_cur.execute(sql_save,(batch_id, schema, table,b64_row))
+	
 	
 	def create_table(self,  table_metadata,table_name,  schema):
 		"""
@@ -846,9 +1268,7 @@ class pg_engine(object):
 			The method updates the schemas  in the table t_replica_tables and then updates the mappings in the 
 			table t_sources. After the final update the commit is issued to make the updates permanent.
 			
-			:todo: The method should run only at replica stopped for the given source. The method should also
-			replay all the logged rows for the given source before updating the schema mappings to avoid 
-			to get an inconsistent replica.
+			:todo: The method should run only at replica stopped for the given source. The method should also  replay all the logged rows for the given source before updating the schema mappings to avoid  to get an inconsistent replica.
 		"""
 		self.connect_db()
 		self.set_source_id()
@@ -863,11 +1283,24 @@ class pg_engine(object):
 				self.set_autocommit_db(False)
 				for schema in old_schema_mappings:
 					old_mapping = old_schema_mappings[schema]
-					new_mapping = new_schema_mappings[schema]
-					if old_mapping != new_mapping:
+					try:
+						new_mapping = new_schema_mappings[schema]
+					except KeyError:
+						new_mapping = None
+					if not new_mapping:
+						self.logger.debug("The mapping for schema %s has ben removed. Deleting the reference from the replica catalogue." % (schema))
+						sql_delete = """
+							DELETE FROM sch_ninja.t_replica_tables 
+							WHERE 	
+									i_id_source=%s
+								AND	v_schema_name=%s
+							;
+						"""
+						self.pgsql_cur.execute(sql_delete, (self.i_id_source,old_mapping ))
+					elif old_mapping != new_mapping:
 						self.logger.debug("Updating mapping for schema %s. Old: %s. New: %s" % (schema, old_mapping, new_mapping))
 						sql_tables = """
-							UPDATE sch_ninja_v2.t_replica_tables 
+							UPDATE sch_ninja.t_replica_tables 
 								SET v_schema_name=%s
 							WHERE 	
 									i_id_source=%s
@@ -878,7 +1311,7 @@ class pg_engine(object):
 						sql_alter_schema = sql.SQL("ALTER SCHEMA {} RENAME TO {};").format(sql.Identifier(old_mapping), sql.Identifier(new_mapping))
 						self.pgsql_cur.execute(sql_alter_schema)
 				sql_source="""
-					UPDATE sch_ninja_v2.t_sources
+					UPDATE sch_ninja.t_sources
 						SET 
 							jsb_schema_mappings=%s
 					WHERE
@@ -901,7 +1334,7 @@ class pg_engine(object):
 	def get_schema_mappings(self):
 		"""
 			The method gets the schema mappings for the given source.
-			The list is the one stored in the table sch_ninja_v2.t_sources. 
+			The list is the one stored in the table sch_ninja.t_sources. 
 			Any change in the configuration file is ignored
 			The method assumes there is a database connection active.
 			:return: the schema mappings extracted from the replica catalogue
@@ -913,7 +1346,7 @@ class pg_engine(object):
 			SELECT 
 				jsb_schema_mappings
 			FROM 
-				sch_ninja_v2.t_sources
+				sch_ninja.t_sources
 			WHERE 
 				t_source=%s;
 			
@@ -931,7 +1364,7 @@ class pg_engine(object):
 			
 		"""
 		sql_source = """
-			UPDATE sch_ninja_v2.t_sources
+			UPDATE sch_ninja.t_sources
 			SET
 				enm_status=%s
 			WHERE
@@ -956,7 +1389,7 @@ class pg_engine(object):
 		"""
 		sql_source = """
 			SELECT i_id_source FROM 
-				sch_ninja_v2.t_sources
+				sch_ninja.t_sources
 			WHERE
 				t_source=%s
 			;
@@ -977,7 +1410,7 @@ class pg_engine(object):
 			The method assumes there is a database connection active.
 		"""
 		sql_cleanup = """
-			DELETE FROM sch_ninja_v2.t_replica_batch WHERE i_id_source=%s;
+			DELETE FROM sch_ninja.t_replica_batch WHERE i_id_source=%s;
 		"""
 		self.pgsql_cur.execute(sql_cleanup, (self.i_id_source, ))
 	
@@ -1000,7 +1433,7 @@ class pg_engine(object):
 			event_time = None
 		
 		sql_master = """
-			INSERT INTO sch_ninja_v2.t_replica_batch
+			INSERT INTO sch_ninja.t_replica_batch
 				(
 					i_id_source,
 					t_binlog_name, 
@@ -1016,10 +1449,45 @@ class pg_engine(object):
 			;
 		"""
 		
+		sql_log_table="""
+			UPDATE sch_ninja.t_sources 
+			SET 
+				v_log_table=ARRAY[v_log_table[2],v_log_table[1]]
+				
+			WHERE 
+				i_id_source=%s
+			RETURNING 
+				v_log_table[1]
+			; 
+		"""
+
+		sql_last_update = """
+			UPDATE 
+				sch_ninja.t_last_received  
+			SET 
+				ts_last_received=to_timestamp(%s)
+			WHERE 
+				i_id_source=%s
+			RETURNING ts_last_received
+		;
+		"""
+		
 		try:
 			self.pgsql_cur.execute(sql_master, (self.i_id_source, binlog_name, binlog_position))
 			results =self.pgsql_cur.fetchone()
 			next_batch_id=results[0]
+			self.pgsql_cur.execute(sql_log_table, (self.i_id_source, ))
+			results = self.pgsql_cur.fetchone()
+			log_table_name = results[0]
+			self.pgsql_cur.execute(sql_last_update, (event_time, self.i_id_source, ))
+			results = self.pgsql_cur.fetchone()
+			db_event_time = results[0]
+			self.logger.info("Saved master data for source: %s" %(self.source, ) )
+			self.logger.debug("Binlog file: %s" % (binlog_name, ))
+			self.logger.debug("Binlog position:%s" % (binlog_position, ))
+			self.logger.debug("Last event: %s" % (db_event_time, ))
+			self.logger.debug("Next log table name: %s" % ( log_table_name, ))
+			
 		except psycopg2.Error as e:
 					self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
 					self.logger.error(self.pgsql_cur.mogrify(sql_master, (self.i_id_source, binlog_name, binlog_position)))
@@ -1054,7 +1522,7 @@ class pg_engine(object):
 		
 		if len(table_pkey) > 0:
 			sql_insert = """ 
-				INSERT INTO sch_ninja_v2.t_replica_tables 
+				INSERT INTO sch_ninja.t_replica_tables 
 					(
 						i_id_source,
 						v_table_name,
@@ -1077,8 +1545,9 @@ class pg_engine(object):
 						SET 
 							v_table_pkey=EXCLUDED.v_table_pkey,
 							t_binlog_name = EXCLUDED.t_binlog_name,
-							i_binlog_position = EXCLUDED.i_binlog_position
-									;
+							i_binlog_position = EXCLUDED.i_binlog_position,
+							b_replica_enabled = True
+				;
 							"""
 			self.pgsql_cur.execute(sql_insert, (
 				self.i_id_source, 
@@ -1091,22 +1560,7 @@ class pg_engine(object):
 			)
 		else:
 			self.logger.warning("Missing primary key. The table %s.%s will not be replicated." % (schema, table,))
-			sql_disable = """
-				UPDATE sch_ninja_v2.t_replica_tables
-					SET b_replica_enabled = 'f'
-				WHERE
-						i_id_source=%s
-					AND	v_table_name=%s
-					AND	v_schema_name=%s
-				;
-			"""
-			self.pgsql_cur.execute(sql_disable, (
-					self.i_id_source, 
-					table, 
-					schema
-					)
-				)
-		
+			self.unregister_table(schema,  table)
 
 	
 	def copy_data(self, csv_file, schema, table, column_list):
@@ -1227,7 +1681,7 @@ class pg_engine(object):
 		"""
 		self.logger.debug("updating batch %s to processed" % (id_batch, ))
 		sql_update=""" 
-			UPDATE sch_ninja_v2.t_replica_batch
+			UPDATE sch_ninja.t_replica_batch
 				SET
 					b_processed=True,
 					ts_processed=now()
@@ -1239,7 +1693,7 @@ class pg_engine(object):
 		self.logger.debug("collecting events id for batch %s " % (id_batch, ))
 		sql_collect_events = """
 			INSERT INTO
-				sch_ninja_v2.t_batch_events
+				sch_ninja.t_batch_events
 				(
 					i_id_batch,
 					i_id_event
@@ -1254,7 +1708,7 @@ class pg_engine(object):
 					i_id_event,
 					ts_event_datetime
 				FROM 
-					sch_ninja_v2.t_log_replica 
+					sch_ninja.t_log_replica 
 				WHERE i_id_batch=%s
 				ORDER BY ts_event_datetime
 			) t_event

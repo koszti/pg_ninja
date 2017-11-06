@@ -13,14 +13,12 @@ package_data = ('%s/pg_ninja' % python_lib, ['LICENSE'])
 
 sql_up_path = 'sql/upgrade'
 conf_dir = "/%s/pg_ninja/configuration" % python_lib
-conn_dir = "/%s/pg_ninja/connection" % python_lib
 sql_dir = "/%s/pg_ninja/sql" % python_lib
 sql_up_dir = "/%s/pg_ninja/%s" % (python_lib, sql_up_path)
 
 
 data_files = []
 conf_files = (conf_dir, ['configuration/config-example.yml'])
-conn_files = (conn_dir, ['connection/connection-example.yml'])
 
 sql_src = ['sql/create_schema.sql', 'sql/drop_schema.sql']
 
@@ -31,7 +29,6 @@ sql_up_files = (sql_up_dir,sql_upgrade)
 
 
 data_files.append(conf_files)
-data_files.append(conn_files)
 data_files.append(sql_files)
 data_files.append(sql_up_files)
 
@@ -39,7 +36,7 @@ data_files.append(sql_up_files)
 
 setup(
 	name="pg_ninja",
-	version="v2.0-DEV",
+	version="v2.0-DEVEL",
 	description="MySQL to PostgreSQL replica and migration",
 	long_description=""" pg_ninja is a tool for replicating from MySQL to PostgreSQL compatible with Python 3.3+.
 The system use the library mysql-replication to pull the row images from MySQL which are transformed into a jsonb object. 
