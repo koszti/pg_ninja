@@ -187,13 +187,20 @@ class mysql_source(object):
 			The mappings are stored in the class dictionary schema_loading.
 		"""
 		for schema in self.schema_list:
-			destination_schema = self.schema_mappings[schema]
+			destination_schema = self.schema_mappings[schema]["clear"]
+			obfuscated_schema = self.schema_mappings[schema]["obfuscate"]
 			loading_schema = "_%s_tmp" % destination_schema[0:59]
-			self.schema_loading[schema] = {'destination':destination_schema, 'loading':loading_schema}
-			self.logger.debug("Creating the schema %s." % loading_schema)
+			loading_obfuscated = "_%s_tmp" % obfuscated_schema[0:59]
+			self.schema_loading[schema] = {'destination':destination_schema, 'loading':loading_schema, 'obfuscated': obfuscated_schema, 'loading_obfuscated': loading_obfuscated}
+			self.logger.debug("Creating the loading schema %s." % loading_schema)
 			self.pg_engine.create_database_schema(loading_schema)
-			self.logger.debug("Creating the schema %s." % destination_schema)
+			self.logger.debug("Creating the destination schema %s." % destination_schema)
 			self.pg_engine.create_database_schema(destination_schema)
+			self.logger.debug("Creating the obfuscated schema %s." % obfuscated_schema)
+			self.pg_engine.create_database_schema(obfuscated_schema)
+			self.logger.debug("Creating the loading obfuscated schema %s." % loading_obfuscated)
+			self.pg_engine.create_database_schema(loading_obfuscated)
+
 			
 	def drop_loading_schemas(self):
 		"""
@@ -203,8 +210,11 @@ class mysql_source(object):
 		"""
 		for schema in self.schema_loading:
 			loading_schema = self.schema_loading[schema]["loading"]
-			self.logger.debug("Dropping the schema %s." % loading_schema)
+			loading_obfuscated = self.schema_loading[schema]["loading_obfuscated"]
+			self.logger.debug("Dropping the loading clear schema %s." % loading_schema)
 			self.pg_engine.drop_database_schema(loading_schema, True)
+			self.logger.debug("Dropping the obfuscated obfuscated schema %s." % loading_obfuscated)
+			self.pg_engine.drop_database_schema(loading_obfuscated, True)
 		
 	def get_table_metadata(self, table, schema):
 		"""

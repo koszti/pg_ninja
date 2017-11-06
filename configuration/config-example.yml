@@ -25,7 +25,6 @@ sources:
                 port: "3306"
                 user: "usr_replica"
                 password: "never_commit_passwords"
-                database:  "db_replica"
                 charset: 'utf8'
                 connect_timeout: 10
         schema_mappings:
@@ -47,6 +46,7 @@ sources:
         copy_mode: 'file'  
         out_dir: /tmp
         sleep_loop: 1
+        obfuscation_file: '~/.pg_ninja/obfuscation/obfuscation-example.yml'
 
 # type_override allows the user to override the default type conversion into a different one. 
 # override_to specifies the destination type which must be a postgresql type and the type cast should be possible

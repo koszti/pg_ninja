@@ -1653,6 +1653,7 @@ class pg_engine(object):
 			swaps the loading with the destination schemas performing a double rename.
 			The method assumes there is a database connection active.
 		"""
+		print(self.schema_loading)
 		for schema in self.schema_loading:
 			self.set_autocommit_db(False)
 			schema_loading = self.schema_loading[schema]["loading"]
@@ -1668,6 +1669,21 @@ class pg_engine(object):
 			self.pgsql_cur.execute(sql_load_to_dest)
 			self.logger.debug("Renaming schema %s in %s" % (schema_temporary, schema_loading))
 			self.pgsql_cur.execute(sql_tmp_to_load)
+			
+			schema_loading = self.schema_loading[schema]["loading_obfuscated"]
+			schema_destination = self.schema_loading[schema]["obfuscated"]
+			schema_temporary = "_rename_%s" % self.schema_loading[schema]["obfuscated"]
+			sql_dest_to_tmp = sql.SQL("ALTER SCHEMA {} RENAME TO {};").format(sql.Identifier(schema_destination), sql.Identifier(schema_temporary))
+			sql_load_to_dest = sql.SQL("ALTER SCHEMA {} RENAME TO {};").format(sql.Identifier(schema_loading), sql.Identifier(schema_destination))
+			sql_tmp_to_load = sql.SQL("ALTER SCHEMA {} RENAME TO {};").format(sql.Identifier(schema_temporary), sql.Identifier(schema_loading))
+			self.logger.info("Swapping schema %s with %s" % (schema_destination, schema_loading))
+			self.logger.debug("Renaming schema %s in %s" % (schema_destination, schema_temporary))
+			self.pgsql_cur.execute(sql_dest_to_tmp)
+			self.logger.debug("Renaming schema %s in %s" % (schema_loading, schema_destination))
+			self.pgsql_cur.execute(sql_load_to_dest)
+			self.logger.debug("Renaming schema %s in %s" % (schema_temporary, schema_loading))
+			self.pgsql_cur.execute(sql_tmp_to_load)
+			
 			self.logger.debug("Commit the swap transaction" )
 			self.pgsql_conn.commit()
 			self.set_autocommit_db(True)
