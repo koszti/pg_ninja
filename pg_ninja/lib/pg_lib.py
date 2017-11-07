@@ -1259,6 +1259,160 @@ class pg_engine(object):
 			self.pgsql_cur.execute(enum_statement)
 		self.pgsql_cur.execute(table_ddl)
 	
+	
+	def alter_obfuscated_fields(self, table, schema_clear, schema_obfuscated):
+		"""
+			The method alter the table in the obfuscated schema using the informations from the schema in clear.
+			All the character varying fields are converted in test. All the not null constraints are dropped except for the
+			fields used in primary keys.
+			
+			:param table: the table name 
+			:param schema_clear: the schema in clear where the table is created
+			:param schema_obfuscated: the schema with the obfuscated table that needs to be altered
+		"""
+		
+		sql_gen_alter = """
+			WITH 
+				t_filter AS
+				(
+					SELECT
+						%s::text AS table_schema,
+						%s::text AS table_name
+				),
+				t_key AS
+				(
+					SELECT 
+						column_name 
+					FROM
+						information_schema.key_column_usage keycol 
+						INNER JOIN t_filter fil
+						ON 
+							keycol.table_schema=fil.table_schema
+						AND	keycol.table_name=fil.table_name
+				)
+
+				SELECT 
+					format('ALTER TABLE %%I.%%I ALTER COLUMN %%I TYPE text ;',
+					%s,
+					col.table_name,
+					col.column_name
+					) AS alter_table
+				FROM
+					information_schema.columns col
+					INNER JOIN t_filter fil
+					ON
+							col.table_schema=fil.table_schema
+						AND	col.table_name=fil.table_name
+				WHERE 
+						column_name NOT IN (
+							SELECT 
+							column_name 
+							FROM
+							t_key
+						)
+					AND	data_type = 'character varying'
+			UNION ALL
+
+				SELECT 
+					format('ALTER TABLE %%I.%%I ALTER COLUMN %%I DROP NOT NULL;',
+					%s,
+					col.table_name,
+					col.column_name
+					) AS alter_table
+				FROM
+					information_schema.columns col
+					INNER JOIN t_filter fil
+					ON 
+							col.table_schema=fil.table_schema
+						AND	col.table_name=fil.table_name
+				WHERE 
+					column_name NOT IN (
+							SELECT 
+							column_name 
+							FROM
+							t_key
+						)
+					AND	is_nullable = 'NO'
+			;
+		"""
+		self.pgsql_cur.execute(sql_gen_alter, (schema_clear, table, schema_obfuscated,schema_obfuscated ))
+		alter_stats = self.pgsql_cur.fetchall()
+		for alter in alter_stats:
+			self.pgsql_cur.execute(alter[0])
+	
+	def copy_obfuscated_table(self, table,  schema, table_obfuscation):
+		"""
+			
+		"""
+		schema_loading = self.schema_loading[schema]["loading"]
+		schema_obfuscated_loading = self.schema_loading[schema]["loading_obfuscated"]
+		
+		sql_crypto = "SELECT count(*) FROM pg_catalog.pg_extension where extname='pgcrypto';"
+		self.pgsql_cur.execute(sql_crypto)
+		pg_crypto = self.pgsql_cur.fetchone()
+		if pg_crypto[0] == 0:
+			self.logger.warning("Extension pgcrypto missing on database. aborting the obfuscation")
+			return
+		self.logger.info("Obfuscating the table %s.%s" % (schema, table))
+		col_list=[]
+		sql_cols = """ 
+					SELECT
+						column_name,
+						CASE
+							WHEN 
+								character_maximum_length IS NOT NULL 
+							THEN
+								format('::%%s(%%s)',data_type,character_maximum_length) 
+							ELSE
+								format('::%%s',data_type)
+						END AS data_cast
+					FROM
+						information_schema.COLUMNS
+					WHERE 
+								table_schema=%s
+						AND table_name=%s
+					ORDER BY 
+						ordinal_position 
+					;
+			"""
+		self.pgsql_cur.execute(sql_cols, (schema_obfuscated_loading,table ))
+		columns = self.pgsql_cur.fetchall()
+		for column in columns:
+			try:
+				obfdata = table_obfuscation[column[0]]
+				if obfdata["mode"] == "normal":
+					col_list.append("(substr(\"%s\"::text, %s , %s)||md5(\"%s\"))%s" %(column[0], obfdata["nonhash_start"], obfdata["nonhash_length"], column[0],  column[1]))
+				elif obfdata["mode"] == "date":
+					col_list.append("to_char(\"%s\"::date,'YYYY-01-01')::date" % (column[0]))
+				elif obfdata["mode"] == "numeric":
+					col_list.append("0%s" % (column[1]))
+				elif obfdata["mode"] == "setnull":
+					col_list.append("NULL%s" % (column[1]))
+			except:
+				col_list.append('"%s"'%(column[0], ))
+		sql_insert = "INSERT INTO  {}.{} SELECT %s FROM {}.{};" % ','.join(col_list) 
+		sql_copy = sql.SQL(sql_insert).format(sql.Identifier(schema_obfuscated_loading),sql.Identifier(table),sql.Identifier(schema_loading), sql.Identifier(table),)
+		self.pgsql_cur.execute(sql_copy)
+	
+		
+	def create_obfuscated_table(self,  table_name,  schema):
+		"""
+			Builds a new table in the obfuscated loading schema using the clear loading schema's definition
+			
+			:param table_name: the table name 
+			:param destination_schema: the schema where the table belongs
+		"""
+		schema_loading = self.schema_loading[schema]["loading"]
+		schema_obfuscated_loading = self.schema_loading[schema]["loading_obfuscated"]
+		sql_create_table = sql.SQL("""
+			CREATE TABLE {}.{}
+				(LIKE {}.{})
+		;
+		""").format(sql.Identifier(schema_obfuscated_loading), sql.Identifier(table_name), sql.Identifier(schema_loading), sql.Identifier(table_name))
+		self.pgsql_cur.execute(sql_create_table)
+		self.alter_obfuscated_fields(table_name, schema_loading, schema_obfuscated_loading)
+		
+	
 	def update_schema_mappings(self):
 		"""
 			The method updates the schema mappings for the given source.
