@@ -638,6 +638,9 @@ class mysql_source(object):
 		self.connect_db_buffered()
 		self.pg_engine.connect_db()
 		self.schema_mappings = self.pg_engine.get_schema_mappings()
+		if self.obfuscation:
+			self.obfuscate_schemas = [schema for schema in self.obfuscation]
+			
 		
 	
 	def refresh_schema(self):

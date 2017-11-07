@@ -13,12 +13,14 @@ package_data = ('%s/pg_ninja' % python_lib, ['LICENSE'])
 
 sql_up_path = 'sql/upgrade'
 conf_dir = "/%s/pg_ninja/configuration" % python_lib
+obf_dir = "/%s/pg_ninja/obfuscation" % python_lib
 sql_dir = "/%s/pg_ninja/sql" % python_lib
 sql_up_dir = "/%s/pg_ninja/%s" % (python_lib, sql_up_path)
 
 
 data_files = []
 conf_files = (conf_dir, ['configuration/config-example.yml'])
+obf_files = (obf_dir, ['obfuscation/obfuscation-example.yml'])
 
 sql_src = ['sql/create_schema.sql', 'sql/drop_schema.sql']
 
@@ -29,6 +31,7 @@ sql_up_files = (sql_up_dir,sql_upgrade)
 
 
 data_files.append(conf_files)
+data_files.append(obf_files)
 data_files.append(sql_files)
 data_files.append(sql_up_files)
 

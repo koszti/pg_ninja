@@ -48,6 +48,7 @@ class replica_engine(object):
 		self.set_configuration_files()
 		self.args = args
 		self.load_config()
+		self.obfuscation = None
 		
 		#pg_engine instance initialisation
 		self.pg_engine = pg_engine()
@@ -200,7 +201,25 @@ class replica_engine(object):
 				self.pg_engine.drop_source()
 			elif drop_src in  self.lst_yes:
 				print('Please type YES all uppercase to confirm')
-			
+	
+	def load_obfuscation(self):
+		"""
+			The method loads the optional obfuscation file provided by the source variable obfuscation_file
+		"""
+		
+		obfuscation_file = self.config["sources"][self.args.source]["obfuscation_file"]
+		if obfuscation_file:
+			self.obfuscation_file = os.path.expanduser(obfuscation_file)
+			self.logger.info("Loading the obfuscation file %s" % self.obfuscation_file)
+			if not os.path.isfile(self.obfuscation_file):
+				print("**FATAL - the obfuscation file is missing. Please ensure the file %s is present." % (self.obfuscation_file))
+				sys.exit()
+			obf_file = open(self.obfuscation_file, 'r')
+			self.obfuscation = yaml.load(obf_file.read())
+			obf_file.close()
+		else:
+			self.logger.info("No obfuscation file provided. All the tables will be in clear." )
+		
 	def init_replica(self):
 		"""
 			The method  initialise a replica for a given source and configuration. 
@@ -212,6 +231,8 @@ class replica_engine(object):
 			print("You cannot specify a table name when running init_replica.")
 		else:
 			self.stop_replica()
+			self.load_obfuscation()
+			self.mysql_source.obfuscation = self.obfuscation
 			if self.args.debug:
 				self.mysql_source.init_replica()
 			else:
