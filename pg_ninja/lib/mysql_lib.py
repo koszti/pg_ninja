@@ -1008,6 +1008,17 @@ class mysql_source(object):
 
 		self.disconnect_db_buffered()
 		
+	def init_obfuscation(self):
+		"""
+			The method initialises the obfuscation into the obfuscated loading schema. 
+			No swap is performed in this method though.
+		"""
+		self.logger.info("starting refresh obfuscation for source %s" % self.source)
+		for schema in self.obfuscate_schemas:
+			destination_schema = self.schema_loading[schema]["loading_obfuscated"]
+			print(destination_schema)
+			
+		
 		
 	def init_replica(self):
 		"""
@@ -1028,6 +1039,8 @@ class mysql_source(object):
 			self.create_destination_tables()
 			self.disconnect_db_buffered()
 			self.copy_tables()
+			if self.obfuscation:
+				self.init_obfuscation()
 			self.pg_engine.swap_schemas()
 			self.pg_engine.clean_batch_data()
 			self.pg_engine.save_master_status(master_batch)

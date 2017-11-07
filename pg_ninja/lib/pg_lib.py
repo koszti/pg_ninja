@@ -1653,7 +1653,6 @@ class pg_engine(object):
 			swaps the loading with the destination schemas performing a double rename.
 			The method assumes there is a database connection active.
 		"""
-		print(self.schema_loading)
 		for schema in self.schema_loading:
 			self.set_autocommit_db(False)
 			schema_loading = self.schema_loading[schema]["loading"]
