@@ -1339,10 +1339,120 @@ class pg_engine(object):
 		alter_stats = self.pgsql_cur.fetchall()
 		for alter in alter_stats:
 			self.pgsql_cur.execute(alter[0])
-	
+
+	def create_obfuscated_indices(self, table, schema):
+		"""
+			The method builds the indices on the obfuscated table using the table in clear as a template.
+			
+			:param table_name: the table name 
+			:param schema: the original mysql schema where the table belongs. this value is used as key to determine the two loading schemas
+		"""
+		schema_loading = self.schema_loading[schema]["loading"]
+		schema_obfuscated_loading = self.schema_loading[schema]["loading_obfuscated"]
+		
+		sql_get_idx = """
+			SELECT 
+				CASE
+					WHEN indisprimary
+					THEN 
+						format(
+							'ALTER TABLE %%I.%%I ADD CONSTRAINT %%I PRIMARY KEY(%%s);',
+							sch_obf,
+							table_name,
+							index_name,
+							column_names
+							
+						)
+					WHEN indisunique
+					THEN 
+						format(
+							'CREATE UNIQUE INDEX %%I ON %%I.%%I (%%s);',
+							index_name,
+							sch_obf,
+							table_name,
+							column_names
+						)
+					ELSE
+						format(
+							'CREATE INDEX %%I ON %%I.%%I (%%s);',
+							index_name,
+							sch_obf,
+							table_name,
+							column_names
+						)
+					
+				
+				END as create_idx
+			FROM
+			(
+				SELECT 
+					tab.relname as table_name,
+					sch.nspname as schema_name,
+					idx.relname as index_name,
+					idx_tab.indisprimary,
+					idx_tab.indisunique,
+					string_agg(quote_ident(col.attname),',') as column_names
+				FROM 
+					pg_class tab
+					INNER JOIN pg_namespace sch
+					ON
+						sch.oid=tab.relnamespace
+					INNER JOIN 
+						(
+							SELECT
+								indisprimary,
+								indisunique,
+								unnest(indkey) as indkey,
+								indrelid,
+								indexrelid
+							FROM
+								pg_index
+						) idx_tab
+						ON tab.oid=idx_tab.indrelid
+					INNER JOIN pg_class idx
+						ON idx_tab.indexrelid=idx.oid
+					INNER JOIN pg_attribute col
+						ON 
+								tab.oid=col.attrelid
+							AND	col.attnum = idx_tab.indkey
+				WHERE
+						tab.relname=%s
+					AND	sch.nspname=%s
+					AND 	col.attnum>0
+				GROUP BY 
+					tab.relname,
+					sch.nspname,
+					idx.relname,
+					idx_tab.indisprimary,
+					idx_tab.indisunique
+				
+			) t_idx,
+			(
+				SELECT
+					%s AS sch_obf
+			) t_obf
+
+			;
+
+		"""
+		self.pgsql_cur.execute(sql_get_idx, (table, schema_loading, schema_obfuscated_loading ) )
+		build_idx = self.pgsql_cur.fetchall()
+		build_idx = [ idx[0] for idx in build_idx ]
+		for idx in build_idx:
+			try:
+				self.logger.info("Executing: %s" % (idx))
+				self.pgsql_cur.execute(idx)
+			except:
+				self.logger.error("Couldn't add the index to the table %s. \nIndex definition: %s" % (table, idx))
+
+
 	def copy_obfuscated_table(self, table,  schema, table_obfuscation):
 		"""
+			The method copies the obfuscated data from the schema loading in clear to the schema loading with obfuscated data.
 			
+			:param table_name: the table name 
+			:param schema: the original mysql schema where the table belongs. this value is used as key to determine the two loading schemas
+			:table_obfuscation: dictionary with the table's obfuscation mapping
 		"""
 		schema_loading = self.schema_loading[schema]["loading"]
 		schema_obfuscated_loading = self.schema_loading[schema]["loading_obfuscated"]
@@ -1400,7 +1510,7 @@ class pg_engine(object):
 			Builds a new table in the obfuscated loading schema using the clear loading schema's definition
 			
 			:param table_name: the table name 
-			:param destination_schema: the schema where the table belongs
+			:param schema: the original mysql schema where the table belongs. this value is used as key to determine the two loading schemas
 		"""
 		schema_loading = self.schema_loading[schema]["loading"]
 		schema_obfuscated_loading = self.schema_loading[schema]["loading_obfuscated"]

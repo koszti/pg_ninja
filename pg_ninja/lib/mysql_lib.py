@@ -1022,6 +1022,7 @@ class mysql_source(object):
 				self.logger.info("Creating the table %s.%s " % (destination_schema, table, ))
 				self.pg_engine.create_obfuscated_table(table,  schema)
 				self.pg_engine.copy_obfuscated_table(table,  schema, table_obfuscation)
+				self.pg_engine.create_obfuscated_indices(table,  schema)
 			
 		
 		
