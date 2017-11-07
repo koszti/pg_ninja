@@ -1023,6 +1023,7 @@ class mysql_source(object):
 				self.pg_engine.create_obfuscated_table(table,  schema)
 				self.pg_engine.copy_obfuscated_table(table,  schema, table_obfuscation)
 				self.pg_engine.create_obfuscated_indices(table,  schema)
+				self.pg_engine.store_obfuscated_table(table,  schema)
 			
 		
 		

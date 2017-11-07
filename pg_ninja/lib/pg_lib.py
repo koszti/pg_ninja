@@ -1340,6 +1340,54 @@ class pg_engine(object):
 		for alter in alter_stats:
 			self.pgsql_cur.execute(alter[0])
 
+
+	def store_obfuscated_table(self, table, schema):
+		"""
+		
+			:param table_name: the table name 
+			:param schema: the original mysql schema where the table belongs. this value is used as key to determine the two loading schemas
+		"""
+		schema_clear = self.schema_loading[schema]["destination"]
+		schema_obfuscated= self.schema_loading[schema]["obfuscated"]
+		
+		sql_delete = """
+			DELETE FROM sch_ninja.t_replica_tables
+			WHERE
+					v_table_name=%s
+				AND	v_schema_name=%s
+				AND i_id_source=%s
+		"""
+		self.pgsql_cur.execute(sql_delete, (table, schema_obfuscated, self.i_id_source))
+		
+		sql_insert = """
+			INSERT INTO sch_ninja.t_replica_tables
+			(
+				i_id_source,
+				v_schema_name,
+				v_table_name,
+				v_table_pkey,
+				t_binlog_name,
+				i_binlog_position,
+				b_replica_enabled
+			)
+			SELECT
+				i_id_source,
+				%s::text AS v_schema_name,
+				v_table_name,
+				v_table_pkey,
+				t_binlog_name,
+				i_binlog_position,
+				b_replica_enabled
+			FROM
+				sch_ninja.t_replica_tables
+			WHERE
+					v_schema_name=%s
+				AND	v_table_name=%s
+				AND	i_id_source=%s
+			;
+		"""
+		self.pgsql_cur.execute(sql_insert, (schema_obfuscated, schema_clear, table, self.i_id_source))
+		
 	def create_obfuscated_indices(self, table, schema):
 		"""
 			The method builds the indices on the obfuscated table using the table in clear as a template.
