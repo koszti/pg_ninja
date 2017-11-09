@@ -14,12 +14,14 @@ CREATE TYPE sch_ninja.en_src_status
 CREATE TYPE sch_ninja.en_binlog_event 
 	AS ENUM ('delete', 'update', 'insert','ddl');
 
+	
 CREATE TYPE sch_ninja.ty_replay_status 
 	AS
 	(
 		b_continue boolean,
-		v_table_error character varying(100)[]
+		v_table_error character varying[]
 	);
+
 	
 --TABLES/INDICES	
 CREATE TABLE sch_ninja.t_sources
@@ -207,6 +209,7 @@ END
 $BODY$
 LANGUAGE plpgsql 
 ;
+
 
 CREATE OR REPLACE FUNCTION sch_ninja.fn_replay_mysql(integer,integer)
 RETURNS sch_ninja.ty_replay_status AS
@@ -515,7 +518,8 @@ $BODY$
 					i_id_batch=v_i_id_batch
 				AND 	i_id_event=ANY(v_i_evt_replay) 
 			;
-		RETURN v_ty_status;
+			v_ty_status.b_continue:=TRUE;
+			RETURN v_ty_status;
 		END IF;
 		
 		v_i_id_batch:= (

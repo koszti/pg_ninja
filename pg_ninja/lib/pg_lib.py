@@ -1340,10 +1340,41 @@ class pg_engine(object):
 		for alter in alter_stats:
 			self.pgsql_cur.execute(alter[0])
 
+	def create_clear_view(self, schema, table):
+		"""
+			The method create the views in the obfuscated_loading schema for the tables with data in clear.
+		"""
+		
+		schema_loading = self.schema_loading[schema]["loading"]
+		schema_obfuscated_loading = self.schema_loading[schema]["loading_obfuscated"]
+		sql_get_create="""
+			SELECT 
+					format('CREATE OR REPLACE VIEW %%I.%%I AS SELECT * FROM %%I.%%I ;',
+						%s,
+						table_name,
+						table_schema,
+						table_name
+					) as create_view,
+					table_name,
+					table_schema
+			FROM
+				information_schema.TABLES 
+			WHERE 
+			table_schema=%s
+			AND table_name=%s
+			;
+		"""
+		self.pgsql_cur.execute(sql_get_create, (schema_obfuscated_loading,  schema_loading, table))
+		view_stat = self.pgsql_cur.fetchone()
+		self.logger.info("creating view %s.%s" % (schema_obfuscated_loading, table))
+		self.pgsql_cur.execute(view_stat[0])
 
 	def store_obfuscated_table(self, table, schema):
 		"""
-		
+			The method trie to remove the obfuscated table from the replication catalogue and then copies the data from the existing
+			table in clear changing the schema.
+			The binlog positions are preserved.
+			
 			:param table_name: the table name 
 			:param schema: the original mysql schema where the table belongs. this value is used as key to determine the two loading schemas
 		"""
@@ -1584,6 +1615,7 @@ class pg_engine(object):
 		"""
 		self.connect_db()
 		self.set_source_id()
+		self.replay_replica()
 		new_schema_mappings = self.sources[self.source]["schema_mappings"]
 		old_schema_mappings = self.get_schema_mappings()
 		

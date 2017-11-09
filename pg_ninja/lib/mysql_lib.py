@@ -1015,6 +1015,7 @@ class mysql_source(object):
 		"""
 		self.logger.info("starting refresh obfuscation for source %s" % self.source)
 		for schema in self.obfuscate_schemas:
+			clear_tables = [table for table in self.schema_tables[schema] if table not in self.obfuscation[schema]]
 			destination_schema = self.schema_loading[schema]["loading_obfuscated"]
 			self.logger.info("processing schema %s into %s" % (schema, destination_schema))
 			for table in self.obfuscation[schema]:
@@ -1024,8 +1025,8 @@ class mysql_source(object):
 				self.pg_engine.copy_obfuscated_table(table,  schema, table_obfuscation)
 				self.pg_engine.create_obfuscated_indices(table,  schema)
 				self.pg_engine.store_obfuscated_table(table,  schema)
-			
-		
+			for table in clear_tables:
+				self.pg_engine.create_clear_view(schema, table)
 		
 	def init_replica(self):
 		"""
