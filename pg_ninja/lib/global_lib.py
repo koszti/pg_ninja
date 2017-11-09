@@ -325,6 +325,9 @@ class replica_engine(object):
 			The method reads the replica stream for the given source and stores the row images 
 			in the target postgresql database.
 		"""
+		self.load_obfuscation()
+		self.mysql_source.obfuscation = self.obfuscation
+			
 		while True:
 			self.logger.info("Reading replica for for source %s " % (self.args.source))
 			self.mysql_source.read_replica()

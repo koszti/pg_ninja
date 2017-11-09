@@ -786,6 +786,7 @@ class mysql_source(object):
 		:return: the batch's data composed by binlog name, binlog position and last event timestamp read from the mysql replica stream.
 		:rtype: dictionary
 		"""
+		print(self.schema_mappings)
 		sql_tokeniser = sql_token()
 		table_type_map = self.get_table_type_map()	
 		inc_tables = self.pg_engine.get_inconsistent_tables()
@@ -892,12 +893,20 @@ class mysql_source(object):
 					table_name=binlogevent.table
 					event_time=binlogevent.timestamp
 					schema_row = binlogevent.schema
-					destination_schema = self.schema_mappings[schema_row]
-					if table_name in inc_tables:
+					destination_schema = self.schema_mappings[schema_row]["clear"]
+					obfuscated_schema = self.schema_mappings[schema_row]["obfuscate"]
+					table_consistent_dict = "%s.%s" % (destination_schema, table_name)
+					if schema_row in self.obfuscation:
+						try:
+							table_obfuscation = self.obfuscation[schema_row][table_name]
+						except:
+							table_obfuscation = None
+					if table_consistent_dict in inc_tables:
+						
 						table_consistent = False
 						log_seq = int(log_file.split('.')[1])
 						log_pos = int(log_position)
-						table_dic = inc_tables[table_name]
+						table_dic = inc_tables[table_consistent_dict]
 						if log_seq > table_dic["log_seq"]:
 							table_consistent = True
 						elif log_seq == table_dic["log_seq"] and log_pos >= table_dic["log_pos"]:
@@ -905,7 +914,7 @@ class mysql_source(object):
 							self.logger.debug("CONSISTENT POINT FOR TABLE %s REACHED  - binlogfile %s, position %s" % (table_name, binlogfile, log_position))
 						if table_consistent:
 							add_row = True
-							self.pg_engine.set_consistent_table(table_name, destination_schema)
+							self.pg_engine.set_consistent_table(table_name, [destination_schema, obfuscated_schema])
 							inc_tables = self.pg_engine.get_inconsistent_tables()
 						else:
 							add_row = False
@@ -949,7 +958,10 @@ class mysql_source(object):
 						event_insert={"global_data":global_data,"event_after":event_after,  "event_before":event_before}
 						size_insert += len(str(event_insert))
 						group_insert.append(event_insert)
-						
+					
+					
+					
+					
 					master_data["File"]=log_file
 					master_data["Position"]=log_position
 					master_data["Time"]=event_time

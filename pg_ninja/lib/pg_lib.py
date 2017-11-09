@@ -180,11 +180,12 @@ class pg_engine(object):
 		inc_results = self.pgsql_cur.fetchall()
 		for table  in inc_results:
 			tab_dic = {}
+			dic_key = "%s.%s" % (table[0], table[1])
 			tab_dic["schema"]  = table[0]
 			tab_dic["table"]  = table[1]
 			tab_dic["log_seq"]  = int(table[2].split('.')[1])
 			tab_dic["log_pos"]  = int(table[3])
-			inc_dic[table[1]] = tab_dic
+			inc_dic[dic_key] = tab_dic
 		return inc_dic
 	
 	def replay_replica(self):
@@ -233,7 +234,7 @@ class pg_engine(object):
 			WHERE
 					i_id_source = %s
 				AND	v_table_name = %s
-				AND	v_schema_name = %s
+				AND	v_schema_name = ANY(%s)
 			;
 		"""
 		self.pgsql_cur.execute(sql_set, (self.i_id_source, table, schema))
