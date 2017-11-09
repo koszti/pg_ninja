@@ -467,7 +467,11 @@ class replica_engine(object):
 		logger = logging.getLogger(__name__)
 		logger.setLevel(logging.DEBUG)
 		logger.propagate = False
-		formatter = logging.Formatter("%(asctime)s: [%(levelname)s] - %(filename)s (%(lineno)s): %(message)s", "%b %e %H:%M:%S")
+		if debug_mode:
+			str_format = "[%(levelname)s] - (%(processName)s):  %(asctime)s: %(filename)s (%(lineno)s): %(message)s"
+		else:
+			str_format = "[%(levelname)s] - %(processName)s:  %(asctime)s: : %(message)s"
+		formatter = logging.Formatter(str_format, "%Y-%m-%d %H:%M:%S")
 		
 		if log_dest=='stdout' or debug_mode:
 			fh=logging.StreamHandler(sys.stdout)
