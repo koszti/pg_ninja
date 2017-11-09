@@ -259,6 +259,9 @@ class replica_engine(object):
 			print("You must specify an origin's schema name using the argument --schema")
 		else:
 			self.stop_replica()
+			self.load_obfuscation()
+			self.mysql_source.obfuscation = self.obfuscation
+			
 			if self.args.debug:
 				self.mysql_source.refresh_schema()
 			else:
@@ -286,6 +289,7 @@ class replica_engine(object):
 			print("You must specify one or more tables, in the form schema.table, separated by comma using the argument --tables")
 		else:
 			self.stop_replica()
+			self.mysql_source.obfuscation = self.obfuscation
 			if self.args.debug:
 				self.mysql_source.sync_tables()
 			else:
