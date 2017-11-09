@@ -698,6 +698,7 @@ class mysql_source(object):
 		self.copy_tables()
 		if self.obfuscation:
 				self.init_obfuscation()
+				self.pg_engine.obfuscation = self.obfuscation
 		try:
 			self.pg_engine.swap_tables()
 			self.drop_loading_schemas()
@@ -706,7 +707,7 @@ class mysql_source(object):
 			self.drop_loading_schemas()
 			self.pg_engine.set_source_status("error")
 			raise
-	
+		
 	def get_table_type_map(self):
 		"""
 			The method builds a dictionary with a key per each schema replicated.
@@ -1016,7 +1017,7 @@ class mysql_source(object):
 			The method initialises the obfuscation into the obfuscated loading schema. 
 			No swap is performed in this method though.
 		"""
-		self.logger.info("starting refresh obfuscation for source %s" % self.source)
+		self.logger.info("building obfuscation for source %s" % self.source)
 		for schema in self.obfuscate_schemas:
 			clear_tables = [table for table in self.schema_tables[schema] if table not in self.obfuscation[schema]]
 			destination_schema = self.schema_loading[schema]["loading_obfuscated"]

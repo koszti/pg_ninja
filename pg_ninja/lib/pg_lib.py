@@ -2086,6 +2086,10 @@ class pg_engine(object):
 		for schema in self.schema_tables:
 			schema_loading = self.schema_loading[schema]["loading"]
 			schema_destination = self.schema_loading[schema]["destination"]
+			schema_loading_obfuscated = self.schema_loading[schema]["loading_obfuscated"]
+			schema_obfuscated = self.schema_loading[schema]["obfuscated"]
+			obfuscated_tables = [table for table in self.obfuscation[schema]]
+			clear_tables = [table for table in self.schema_tables[schema] if table not in self.obfuscation[schema]]
 			for table in self.schema_tables[schema]:
 				self.logger.info("Swapping table %s.%s with %s.%s" % (schema_destination, table, schema_loading, table))
 				sql_drop_origin = sql.SQL("DROP TABLE {}.{} CASCADE;").format(sql.Identifier(schema_destination),sql.Identifier(table))
@@ -2095,8 +2099,23 @@ class pg_engine(object):
 				self.logger.debug("Changing the schema for table %s.%s to %s" % (schema_loading, table, schema_destination))
 				self.pgsql_cur.execute(sql_set_schema_new)
 				self.pgsql_conn.commit()
+			self.set_autocommit_db(True)	
+			for table in self.schema_tables[schema]:
+				self.logger.info("Swapping obfuscated relation %s.%s with %s.%s" % (schema_obfuscated, table, schema_loading_obfuscated, table))
+				sql_drop_view = sql.SQL("DROP VIEW IF EXISTS {}.{} CASCADE;").format(sql.Identifier(schema_obfuscated),sql.Identifier(table))
+				sql_drop_table = sql.SQL("DROP TABLE IF EXISTS {}.{} CASCADE;").format(sql.Identifier(schema_obfuscated),sql.Identifier(table))
+				try:
+					self.pgsql_cur.execute(sql_drop_view)
+				except:
+					self.pgsql_cur.execute(sql_drop_table)
+			for table in obfuscated_tables:
+				sql_set_schema_table = sql.SQL("ALTER TABLE {}.{} SET SCHEMA {};").format(sql.Identifier(schema_loading_obfuscated),sql.Identifier(table), sql.Identifier(schema_obfuscated))
+				self.pgsql_cur.execute(sql_set_schema_table)
+			for table in clear_tables:
+				sql_set_schema_view = sql.SQL("ALTER VIEW {}.{} SET SCHEMA {};").format(sql.Identifier(schema_loading_obfuscated),sql.Identifier(table), sql.Identifier(schema_obfuscated))
+				self.pgsql_cur.execute(sql_set_schema_view)
 				
-		self.set_autocommit_db(True)
+		
 	
 	def create_database_schema(self, schema_name):
 		"""
