@@ -30,6 +30,9 @@ CREATE TABLE sch_ninja.t_sources
 	t_source				text NOT NULL,
 	jsb_schema_mappings	jsonb NOT NULL,
 	enm_status sch_ninja.en_src_status NOT NULL DEFAULT 'ready',
+	t_binlog_name text,
+	i_binlog_position integer,
+	b_consistent boolean NOT NULL DEFAULT TRUE,
 	v_log_table character varying[] ,
 	CONSTRAINT pk_t_sources PRIMARY KEY (i_id_source)
 )
