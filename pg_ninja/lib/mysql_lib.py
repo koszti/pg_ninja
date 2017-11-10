@@ -4,6 +4,7 @@ import io
 import pymysql
 import codecs
 import binascii
+import hashlib
 from pymysqlreplication import BinLogStreamReader
 from pymysqlreplication.event import QueryEvent
 from pymysqlreplication.row_event import DeleteRowsEvent,UpdateRowsEvent,WriteRowsEvent
@@ -786,7 +787,6 @@ class mysql_source(object):
 		:return: the batch's data composed by binlog name, binlog position and last event timestamp read from the mysql replica stream.
 		:rtype: dictionary
 		"""
-		print(self.schema_mappings)
 		sql_tokeniser = sql_token()
 		table_type_map = self.get_table_type_map()	
 		inc_tables = self.pg_engine.get_inconsistent_tables()
@@ -959,8 +959,20 @@ class mysql_source(object):
 						size_insert += len(str(event_insert))
 						group_insert.append(event_insert)
 					
-					
-					
+						if table_obfuscation:
+							event_after_obf = dict(event_after.items())
+							global_obf = dict(global_data.items())
+							global_obf["schema"] = obfuscated_schema
+							for column_name in table_obfuscation:
+								try:
+									obf_mode = table_obfuscation[column_name]
+									event_after_obf[column_name]=self.obfuscate_value(event_after_obf[column_name], obf_mode)
+									event_obf={"global_data":global_obf,"event_after":event_after_obf,  "event_before":event_before}
+									group_insert.append(event_obf)
+
+								except:
+									self.logger.error("discarded row in obfuscation process.\n global_data:%s \n event_data:%s \n" % (global_data,event_after ))
+						
 					
 					master_data["File"]=log_file
 					master_data["Position"]=log_position
@@ -983,7 +995,30 @@ class mysql_source(object):
 			close_batch=True
 		
 		return [master_data, close_batch]
-	
+
+	def obfuscate_value(self, column_value, obf_mode):
+		"""
+			performs obfuscation on the fly for the column 
+		"""
+		if column_value:
+			if obf_mode["mode"]=="normal" :
+				obf=hashlib.sha256()
+				if obf_mode["nonhash_length"]==0:
+					obf.update(column_value.encode('utf-8'))
+					column_value=obf.hexdigest()
+				if obf_mode["nonhash_length"]>0:
+					prefix_start=obf_mode["nonhash_start"]-1
+					prefix_end=prefix_start+obf_mode["nonhash_length"]
+					col_prefix=column_value[prefix_start:prefix_end]
+					obf.update(column_value.encode('utf-8'))
+					column_value=col_prefix+str(obf.hexdigest())
+			elif obf_mode["mode"]=="date":
+				column_value=column_value.replace(day=1,month=1)
+			elif obf_mode["mode"]=="numeric":
+				column_value='0'
+			elif obf_mode["mode"] == "setnull":
+				column_value=None
+		return column_value
 	
 	def read_replica(self):
 		"""
