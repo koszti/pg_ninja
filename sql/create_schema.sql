@@ -320,7 +320,7 @@ $BODY$
 						WHEN enm_binlog_event = 'insert'
 						THEN
 							format(
-								'INSERT INTO %I.%I (%s) VALUES (%s);',
+								'INSERT INTO %I.%I (%s) VALUES (%s) ON CONFLICT DO NOTHING;',
 								v_schema_name,
 								v_table_name,
 								array_to_string(t_colunm,','),
