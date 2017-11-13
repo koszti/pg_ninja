@@ -791,6 +791,13 @@ class mysql_source(object):
 		:rtype: dictionary
 		"""
 		sql_tokeniser = sql_token()
+		limit_tables = None
+		skip_tables = None
+		if self.limit_tables:
+			limit_tables = [table.split('.')[1] for table in self.limit_tables]
+		if self.skip_tables:
+			skip_tables = [table.split('.')[1] for table in self.skip_tables]
+		
 		table_type_map = self.get_table_type_map()	
 		inc_tables = self.pg_engine.get_inconsistent_tables()
 		close_batch = False
@@ -810,8 +817,8 @@ class mysql_source(object):
 			log_pos = log_position, 
 			resume_stream = True, 
 			only_schemas = self.schema_replica, 
-			only_tables = self.limit_tables, 
-			ignored_tables = self.skip_tables, 
+			only_tables = limit_tables, 
+			ignored_tables = skip_tables, 
 		)
 		self.logger.debug("log_file %s, log_position %s. id_batch: %s " % (log_file, log_position, id_batch))
 		
