@@ -41,6 +41,7 @@ sources:
         lock_timeout: "120s"
         my_server_id: 100
         replica_batch_size: 1000
+        replay_max_rows: 2000
         batch_retention: '1 day'
         copy_max_memory: 300M
         copy_mode: 'file'  
@@ -56,4 +57,4 @@ type_override:
     "tinyint(1)":
         override_to: boolean
         override_tables:
-            - "*"
+            - "foo.bar"

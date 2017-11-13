@@ -22,6 +22,7 @@ class pg_encoder(json.JSONEncoder):
 			return str(obj)
 		return json.JSONEncoder.default(self, obj)
 
+
 class pg_engine(object):
 	def __init__(self):
 		python_lib=get_python_lib()
@@ -188,6 +189,7 @@ class pg_engine(object):
 			inc_dic[dic_key] = tab_dic
 		return inc_dic
 	
+	
 	def replay_replica(self):
 		"""
 			The method replays the row images in the target database using the function 
@@ -207,15 +209,17 @@ class pg_engine(object):
 		tables_error = []
 		continue_loop = True
 		self.source_config = self.sources[self.source]
-		self.replica_batch_size = self.source_config["replica_batch_size"]
+		replay_max_rows = self.source_config["replay_max_rows"]
 		while continue_loop:
 			sql_replay = """SELECT * FROM sch_ninja.fn_replay_mysql(%s,%s)""";
-			self.pgsql_cur.execute(sql_replay, (self.replica_batch_size, self.i_id_source, ))
+			self.pgsql_cur.execute(sql_replay, (replay_max_rows, self.i_id_source, ))
 			replay_status = self.pgsql_cur.fetchone()
-			self.logger.debug("Replay status %s" % replay_status[0])
+			if replay_status[0]:
+				self.logger.debug("Replayed %s rows for source %s" % (replay_max_rows, self.source) )
 			continue_loop = replay_status[0]
 			if replay_status[1]:
 				tables_error.append(replay_status[1])
+				
 		return tables_error
 			
 	
@@ -1067,17 +1071,20 @@ class pg_engine(object):
 			:return: the postgresql converted column type
 			:rtype: string
 		"""
-		try:
-			
-			table_full = "%s.%s" % (schema, table)
-			type_override = self.type_override[column["column_type"]]
-			override_to = type_override["override_to"]
-			override_tables = type_override["override_tables"]
-			if override_tables[0] == '*' or table_full in override_tables:
-				column_type = override_to
-			else:
+		if self.type_override:
+			try:
+				
+				table_full = "%s.%s" % (schema, table)
+				type_override = self.type_override[column["column_type"]]
+				override_to = type_override["override_to"]
+				override_tables = type_override["override_tables"]
+				if override_tables[0] == '*' or table_full in override_tables:
+					column_type = override_to
+				else:
+					column_type = self.type_dictionary[column["data_type"]]
+			except KeyError:
 				column_type = self.type_dictionary[column["data_type"]]
-		except KeyError:
+		else:
 			column_type = self.type_dictionary[column["data_type"]]
 		return column_type
 	

@@ -572,9 +572,12 @@ class mysql_source(object):
 			table_list = self.schema_tables[schema]
 			for table in table_list:
 				self.logger.info("Copying the source table %s into %s.%s" %(table, loading_schema, table) )
-				master_status = self.copy_data(schema, table)
-				table_pkey = self.create_indices(schema, table)
-				self.pg_engine.store_table(destination_schema, table, table_pkey, master_status)
+				try:
+					master_status = self.copy_data(schema, table)
+					table_pkey = self.create_indices(schema, table)
+					self.pg_engine.store_table(destination_schema, table, table_pkey, master_status)
+				except:
+					self.logger.info("Could not copy the table %s. Excluding it from the replica." %(table) )
 				
 	
 	def set_copy_max_memory(self):
@@ -836,8 +839,10 @@ class mysql_source(object):
 					schema_query = binlogevent.schema.decode()
 				except:
 					schema_query = binlogevent.schema
-				destination_schema = self.schema_mappings[schema_query]
+				
 				if binlogevent.query.strip().upper() not in self.statement_skip and schema_query in self.schema_mappings: 
+					destination_schema = self.schema_mappings[schema_query]["clear"]
+					obfuscated_schema = self.schema_mappings[schema_query]["obfuscate"]
 					log_position = binlogevent.packet.log_pos
 					master_data["File"] = binlogfile
 					master_data["Position"] = log_position
@@ -979,7 +984,7 @@ class mysql_source(object):
 					master_data["Time"]=event_time
 					
 					if len(group_insert)>=self.replica_batch_size:
-						self.logger.debug("Max rows per batch reached. Writing %s. rows. Size in bytes: %s " % (len(group_insert), size_insert))
+						self.logger.info("Max rows per batch reached. Writing %s. rows. Size in bytes: %s " % (len(group_insert), size_insert))
 						self.logger.debug("Master coordinates: %s" % (master_data, ))
 						self.pg_engine.write_batch(group_insert)
 						size_insert=0
@@ -990,7 +995,7 @@ class mysql_source(object):
 						
 		my_stream.close()
 		if len(group_insert)>0:
-			self.logger.debug("writing the last %s events" % (len(group_insert), ))
+			self.logger.info("Replica stream consumed. Writing the last %s events" % (len(group_insert), ))
 			self.pg_engine.write_batch(group_insert)
 			close_batch=True
 		
@@ -1069,12 +1074,15 @@ class mysql_source(object):
 			destination_schema = self.schema_loading[schema]["loading_obfuscated"]
 			self.logger.info("processing schema %s into %s" % (schema, destination_schema))
 			for table in self.obfuscation[schema]:
-				table_obfuscation = self.obfuscation[schema][table]
-				self.logger.info("Creating the table %s.%s " % (destination_schema, table, ))
-				self.pg_engine.create_obfuscated_table(table,  schema)
-				self.pg_engine.copy_obfuscated_table(table,  schema, table_obfuscation)
-				self.pg_engine.create_obfuscated_indices(table,  schema)
-				self.pg_engine.store_obfuscated_table(table,  schema)
+				try:
+					table_obfuscation = self.obfuscation[schema][table]
+					self.logger.info("Creating the table %s.%s " % (destination_schema, table, ))
+					self.pg_engine.create_obfuscated_table(table,  schema)
+					self.pg_engine.copy_obfuscated_table(table,  schema, table_obfuscation)
+					self.pg_engine.create_obfuscated_indices(table,  schema)
+					self.pg_engine.store_obfuscated_table(table,  schema)
+				except:
+					self.logger.error("Could not obfuscate the table  %s.%s " % (destination_schema,  table))
 			for table in clear_tables:
 				self.pg_engine.create_clear_view(schema, table)
 		
@@ -1084,7 +1092,7 @@ class mysql_source(object):
 		"""
 		self.logger.debug("starting init replica for source %s" % self.source)
 		self.init_sync()
-		master_batch = self.get_master_coordinates()
+		master_start = self.get_master_coordinates()
 		self.pg_engine.set_source_status("initialising")
 		self.pg_engine.cleanup_source_tables()
 		self.schema_list = [schema for schema in self.schema_mappings]
@@ -1101,10 +1109,13 @@ class mysql_source(object):
 				self.init_obfuscation()
 			self.pg_engine.swap_schemas()
 			self.pg_engine.clean_batch_data()
-			self.pg_engine.save_master_status(master_batch)
-			self.pg_engine.set_source_highwatermark(master_batch, consistent=False)
+			self.pg_engine.save_master_status(master_start)
 			self.drop_loading_schemas()
 			self.pg_engine.set_source_status("initialised")
+			self.connect_db_buffered()
+			master_end = self.get_master_coordinates()
+			self.disconnect_db_buffered()
+			self.pg_engine.set_source_highwatermark(master_end, consistent=False)
 		except:
 			self.drop_loading_schemas()
 			self.pg_engine.set_source_status("error")

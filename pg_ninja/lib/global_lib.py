@@ -329,7 +329,6 @@ class replica_engine(object):
 		self.mysql_source.obfuscation = self.obfuscation
 			
 		while True:
-			self.logger.info("Reading replica for for source %s " % (self.args.source))
 			self.mysql_source.read_replica()
 			time.sleep(self.sleep_loop)
 	
@@ -341,7 +340,6 @@ class replica_engine(object):
 		self.pg_engine.connect_db()
 		self.pg_engine.set_source_id()
 		while True:
-			self.logger.info("Replaying data changes for source %s " % (self.args.source))
 			tables_error = self.pg_engine.replay_replica()
 			if len(tables_error) > 0:
 				table_list = [item for sublist in tables_error for item in sublist]
