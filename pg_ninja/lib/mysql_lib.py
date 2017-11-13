@@ -979,11 +979,10 @@ class mysql_source(object):
 								try:
 									obf_mode = table_obfuscation[column_name]
 									event_after_obf[column_name]=self.obfuscate_value(event_after_obf[column_name], obf_mode)
-									event_obf={"global_data":global_obf,"event_after":event_after_obf,  "event_before":event_before}
-									group_insert.append(event_obf)
-
 								except:
 									self.logger.error("discarded row in obfuscation process.\n global_data:%s \n event_data:%s \n" % (global_data,event_after ))
+							event_obf={"global_data":global_obf,"event_after":event_after_obf,  "event_before":event_before}
+							group_insert.append(event_obf)
 						
 					
 					master_data["File"]=log_file
