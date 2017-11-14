@@ -442,7 +442,8 @@ class replica_engine(object):
 		
 	def show_status(self):
 		"""
-			list the replica status using the configuration files and the replica catalogue
+			list the replica status using the configuration files and the replica catalogue 
+			
 		"""
 		self.pg_engine.source = self.args.source
 		configuration_data = self.pg_engine.get_status()
