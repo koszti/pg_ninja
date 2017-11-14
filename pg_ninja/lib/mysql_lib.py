@@ -908,11 +908,15 @@ class mysql_source(object):
 					destination_schema = self.schema_mappings[schema_row]["clear"]
 					obfuscated_schema = self.schema_mappings[schema_row]["obfuscate"]
 					table_consistent_dict = "%s.%s" % (destination_schema, table_name)
-					if schema_row in self.obfuscation:
-						try:
-							table_obfuscation = self.obfuscation[schema_row][table_name]
-						except:
-							table_obfuscation = None
+					try:
+						if schema_row in self.obfuscation:
+							try:
+								table_obfuscation = self.obfuscation[schema_row][table_name]
+							except:
+								table_obfuscation = None
+					except:
+						table_obfuscation = None
+
 					if table_consistent_dict in inc_tables:
 						
 						table_consistent = False
