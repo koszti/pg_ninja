@@ -951,7 +951,7 @@ class pg_engine(object):
 					FROM 
 						sch_ninja.t_sources
 					WHERE
-						t_source='example'
+						t_source=%s
 
 				) sch
 				;
