@@ -2187,7 +2187,7 @@ class pg_engine(object):
 					self.logger.error(self.pgsql_cur.mogrify(sql_head,data_row))
 			except ValueError:
 				self.logger.warning("character mismatch when inserting the data, trying to cleanup the row data")
-				data_row = [item.replace("\x00", "") for item in data_row]
+				data_row = [str(item).replace("\x00", "") for item in data_row]
 				try:
 					self.pgsql_cur.execute(sql_head,data_row)	
 				except:
