@@ -470,7 +470,7 @@ class replica_engine(object):
 			for mapping in schema_mappings:
 				origin_schema =  mapping[0]
 				destination_schema=  mapping[1]
-				obfuscated_schema =  mapping[1]
+				obfuscated_schema =  mapping[2]
 				tab_row = [origin_schema, destination_schema, obfuscated_schema]
 				tab_body.append(tab_row)
 			print(tabulate(tab_body, headers=tab_headers, tablefmt="simple"))
