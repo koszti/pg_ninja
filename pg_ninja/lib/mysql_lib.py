@@ -876,7 +876,6 @@ class mysql_source(object):
 								self.pg_engine.set_consistent_table(table_name, destination_schema)
 								inc_tables = self.pg_engine.get_inconsistent_tables()
 						if write_ddl:
-							table_metadata = self.get_table_metadata(table_name, schema_query)
 							event_time = binlogevent.timestamp
 							self.logger.debug("TOKEN: %s" % (token))
 							
@@ -888,7 +887,7 @@ class mysql_source(object):
 									"batch_id":id_batch, 
 									"log_table":log_table
 								}
-								self.pg_engine.write_ddl(token, query_data, table_metadata, destination_schema)
+								self.pg_engine.write_ddl(token, query_data, destination_schema, obfuscated_schema)
 								close_batch=True
 							
 						

@@ -269,7 +269,7 @@ class pg_engine(object):
 		table_pkey = self.pgsql_cur.fetchone()
 		return table_pkey[0]
 		
-	def generate_ddl(self, token,  destination_schema):
+	def __generate_ddl(self, token,  destination_schema):
 		""" 
 			The method builds the DDL using the tokenised SQL stored in token.
 			The supported commands are 
@@ -557,51 +557,104 @@ class pg_engine(object):
 						"""
 		self.pgsql_cur.execute(sql_delete, (self.i_id_source, ))	
 	
-	def write_ddl(self, token, query_data, table_metadata, destination_schema):
+	def __count_table_schema(self, table, schema):
+		"""
+			The method checks if the table exists in the given schema.
+			
+			:param table: the table's name
+			:param schema: the postgresql schema where the table should exist
+			:return: the count from pg_tables where table name and schema name are the given parameters
+			:rtype: integer
+		"""
+		sql_check = """
+			SELECT 
+				count(*) 
+			FROM 
+				pg_tables 
+			WHERE 
+					schemaname=%s
+				AND	tablename=%s;
+		"""
+		self.pgsql_cur.execute(sql_check, (schema, table ))	
+		count_table = self.pgsql_cur.fetchone()
+		return count_table[0]
+	
+	def __count_view_schema(self, view, schema):
+		"""
+			The method checks if the table exists in the given schema.
+			
+			:param table: the table's name
+			:param schema: the postgresql schema where the table should exist
+			:return: the count from pg_tables where table name and schema name are the given parameters
+			:rtype: integer
+		"""
+		sql_check = """
+			SELECT 
+				count(*) 
+			FROM 
+				pg_views
+			WHERE 
+					schemaname=%s
+				AND	viewname=%s;
+		"""
+		self.pgsql_cur.execute(sql_check, (schema, view))	
+		count_view = self.pgsql_cur.fetchone()
+		return count_view[0]
+	
+	
+	def write_ddl(self, token, query_data,  destination_schema, obfuscated_schema):
 		"""
 			The method writes the DDL built from the tokenised sql into PostgreSQL.
 			
 			:param token: the tokenised query
 			:param query_data: query's metadata (schema,binlog, etc.)
-			:param table_metadata: the table's metadata retrieved from mysql. is an empty tuple if the statement is a drop table
 			:param destination_schema: the postgresql destination schema determined using the schema mappings.
 		"""
-		pg_ddl = self.generate_ddl(token, destination_schema)
-		log_table = query_data["log_table"]
-		insert_vals = (	
-				query_data["batch_id"], 
-				token["name"],  
-				query_data["schema"], 
-				query_data["binlog"], 
-				query_data["logpos"], 
-				pg_ddl
-			)
-		sql_insert=sql.SQL("""
-			INSERT INTO "sch_ninja".{}
-				(
-					i_id_batch, 
-					v_table_name, 
-					v_schema_name, 
-					enm_binlog_event, 
-					t_binlog_name, 
-					i_binlog_position, 
-					t_query
-				)
-			VALUES
-				(
-					%s,
-					%s,
-					%s,
-					'ddl',
-					%s,
-					%s,
-					%s
-				)
-			;
-		""").format(sql.Identifier(log_table), )
+		drop_create_view = None
+		count_table = self.__count_table_schema(token["name"], destination_schema)
+		count_view = self.__count_view_schema(token["name"], obfuscated_schema)
+		if count_table == 1:
+			pg_ddl = self.__generate_ddl(token, destination_schema)
+			if count_view == 1:
+				ddl_view =  self.__generate_drop_view(token["name"], destination_schema, obfuscated_schema)
+				pg_ddl = "%s %s %s" % (ddl_view["drop"], pg_ddl, ddl_view["create"])
 		
-		self.pgsql_cur.execute(sql_insert, insert_vals)
-	
+			self.logger.debug("Translated query: %s " % (pg_ddl,))
+			log_table = query_data["log_table"]
+			insert_vals = (	
+					query_data["batch_id"], 
+					token["name"],  
+					query_data["schema"], 
+					query_data["binlog"], 
+					query_data["logpos"], 
+					pg_ddl
+				)
+			sql_insert=sql.SQL("""
+				INSERT INTO "sch_ninja".{}
+					(
+						i_id_batch, 
+						v_table_name, 
+						v_schema_name, 
+						enm_binlog_event, 
+						t_binlog_name, 
+						i_binlog_position, 
+						t_query
+					)
+				VALUES
+					(
+						%s,
+						%s,
+						%s,
+						'ddl',
+						%s,
+						%s,
+						%s
+					)
+				;
+			""").format(sql.Identifier(log_table), )
+			
+			self.pgsql_cur.execute(sql_insert, insert_vals)
+		
 	def get_batch_data(self):
 		"""
 			The method updates the batch status to started for the given source_id and returns the 
@@ -1104,6 +1157,24 @@ class pg_engine(object):
 		self.pgsql_cur.execute(sql_replay, (self.i_id_source, ))
 		self.pgsql_cur.execute(sql_receive, (self.i_id_source, ))
 
+	def __generate_drop_view(self, table, destination_schema, obfuscated_schema):
+		"""
+			The method generates the drop and create view to wrap around the DDL built from the
+			parsed token.
+			
+			:param table: The table name
+			:param destination_schema: The table's schema name
+			:param obfuscated_schema: The view's schema name
+			:return: the statements for dropping and creating the view which selects from the table
+			:rtype: dictionary
+		"""
+		view_ddl = {}
+		query_drop_view = sql.SQL(" DROP VIEW IF EXISTS {}.{} CASCADE;").format(sql.Identifier(obfuscated_schema), sql.Identifier(table))
+		query_create_view = sql.SQL(" CREATE OR REPLACE VIEW {}.{} AS SELECT * FROM  {}.{} ;").format(sql.Identifier(obfuscated_schema), sql.Identifier(table),sql.Identifier(destination_schema), sql.Identifier(table))
+		view_ddl["drop"] = self.pgsql_cur.mogrify(query_drop_view).decode()	
+		view_ddl["create"] = self.pgsql_cur.mogrify(query_create_view).decode()
+		return view_ddl
+
 	def  generate_default_statements(self, schema,  table, column, create_column=None):
 		"""
 			The method gets the default value associated with the table and column removing the cast.
@@ -1144,10 +1215,14 @@ class pg_engine(object):
 		query_add_default = ""
 
 		if default_value:
-			query_drop_default = """ ALTER TABLE  "%s"."%s" ALTER COLUMN "%s" DROP DEFAULT;""" % (schema, table, column)
-			query_add_default = """ ALTER TABLE  "%s"."%s" ALTER COLUMN "%s" SET DEFAULT %s ; """ % (schema, table, create_column, default_value[0])
+			query_drop_default = sql.SQL(" ALTER TABLE {}.{} ALTER COLUMN {} DROP DEFAULT;").format(sql.Identifier(schema), sql.Identifier(table), sql.Identifier(column))
+			query_add_default = sql.SQL(" ALTER TABLE  {}.{} ALTER COLUMN {} SET DEFAULT %s;").format(sql.Identifier(schema), sql.Identifier(table), sql.Identifier(column))
+			
+			query_drop_default = self.pgsql_cur.mogrify(query_drop_default)
+			query_add_default = self.pgsql_cur.mogrify(query_add_default, (default_value[0], ))
 		
-		return {'drop':query_drop_default, 'create':query_add_default}
+		return {'drop':query_drop_default.decode(), 'create':query_add_default.decode()}
+
 
 
 	def get_data_type(self, column, schema,  table):
