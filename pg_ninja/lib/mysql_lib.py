@@ -896,6 +896,7 @@ class mysql_source(object):
 						my_stream.close()
 						return [master_data, close_batch]
 			else:
+				table_obfuscation = None
 				size_insert=0
 				for row in binlogevent.rows:
 					add_row = True
