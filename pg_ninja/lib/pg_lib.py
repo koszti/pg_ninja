@@ -2434,10 +2434,16 @@ class pg_engine(object):
 					self.pgsql_cur.execute(sql_drop_table)
 			for table in obfuscated_tables:
 				sql_set_schema_table = sql.SQL("ALTER TABLE {}.{} SET SCHEMA {};").format(sql.Identifier(schema_loading_obfuscated),sql.Identifier(table), sql.Identifier(schema_obfuscated))
-				self.pgsql_cur.execute(sql_set_schema_table)
+				try:
+					self.pgsql_cur.execute(sql_set_schema_table)
+				except:
+					pass
 			for table in clear_tables:
 				sql_set_schema_view = sql.SQL("ALTER VIEW {}.{} SET SCHEMA {};").format(sql.Identifier(schema_loading_obfuscated),sql.Identifier(table), sql.Identifier(schema_obfuscated))
-				self.pgsql_cur.execute(sql_set_schema_view)
+				try:
+					self.pgsql_cur.execute(sql_set_schema_view)
+				except:
+					pass
 				
 		
 	
