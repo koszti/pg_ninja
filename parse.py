@@ -48,7 +48,8 @@ ALTER TABLE `test` DROP PRIMARY KEY;
 #statement="""ALTER TABLE `test_table` ADD UNIQUE INDEX `idx_unique` (`log`, `status`);"""
 #statement = """CREATE TABLE test (id integer null auto_increment primary key, `test_col` bigint(20)) ;"""
 #statement = """CREATE TABLE test (id integer auto_increment, primary key(id)  )"""
-statement = """RENAME TABLE `sakila`.`test_partition` TO `sakila`.`_test_partition_old`, `sakila`.`_test_partition_new` TO `sakila`.`test_partition`"""
+#statement = """RENAME TABLE `sakila`.`test_partition` TO `sakila`.`_test_partition_old`, `sakila`.`_test_partition_new` TO `sakila`.`test_partition`"""
+statement = "ALTER TABLE user_profile_information_change MODIFY new_value LONGTEXT;"
 token_sql=sql_token()
 token_sql.parse_sql(statement)
 #print (token_sql.tokenised)

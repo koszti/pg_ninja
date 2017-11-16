@@ -2416,7 +2416,7 @@ class pg_engine(object):
 			clear_tables = [table for table in self.schema_tables[schema] if table not in self.obfuscation[schema]]
 			for table in self.schema_tables[schema]:
 				self.logger.info("Swapping table %s.%s with %s.%s" % (schema_destination, table, schema_loading, table))
-				sql_drop_origin = sql.SQL("DROP TABLE {}.{} CASCADE;").format(sql.Identifier(schema_destination),sql.Identifier(table))
+				sql_drop_origin = sql.SQL("DROP TABLE IF EXISTS {}.{} CASCADE;").format(sql.Identifier(schema_destination),sql.Identifier(table))
 				sql_set_schema_new = sql.SQL("ALTER TABLE {}.{} SET SCHEMA {};").format(sql.Identifier(schema_loading),sql.Identifier(table), sql.Identifier(schema_destination))
 				self.logger.debug("Dropping the original table %s.%s " % (schema_destination, table))
 				self.pgsql_cur.execute(sql_drop_origin)
