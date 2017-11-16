@@ -486,7 +486,7 @@ class replica_engine(object):
 		self.pg_eng.set_source_id('running')
 		while True:
 			self.my_eng.run_replica(self.pg_eng)
-			#self.pg_eng.process_batch(self.global_config.replica_batch_size)
+			self.pg_eng.process_batch(self.global_config.replica_batch_size)
 			self.logger.info("batch complete. sleeping %s second(s)" % (self.sleep_loop, ))
 			time.sleep(self.sleep_loop)
 			if self.check_request_exit():
