@@ -1079,22 +1079,25 @@ class mysql_source(object):
 		"""
 		self.logger.info("building obfuscation for source %s" % self.source)
 		for schema in self.obfuscate_schemas:
-			clear_tables = [table for table in self.schema_tables[schema] if table not in self.obfuscation[schema]]
-			destination_schema = self.schema_loading[schema]["loading_obfuscated"]
-			self.logger.info("processing schema %s into %s" % (schema, destination_schema))
-			for table in self.obfuscation[schema]:
-				try:
-					table_obfuscation = self.obfuscation[schema][table]
-					self.logger.info("Creating the table %s.%s " % (destination_schema, table, ))
-					self.pg_engine.create_obfuscated_table(table,  schema)
-					self.pg_engine.copy_obfuscated_table(table,  schema, table_obfuscation)
-					self.pg_engine.create_obfuscated_indices(table,  schema)
-					self.pg_engine.store_obfuscated_table(table,  schema)
-				except:
-					self.logger.error("Could not obfuscate the table  %s.%s " % (destination_schema,  table))
-			for table in clear_tables:
-				self.pg_engine.create_clear_view(schema, table)
-		
+			try:
+				clear_tables = [table for table in self.schema_tables[schema] if table not in self.obfuscation[schema]]
+				destination_schema = self.schema_loading[schema]["loading_obfuscated"]
+				self.logger.info("processing schema %s into %s" % (schema, destination_schema))
+				for table in self.obfuscation[schema]:
+					try:
+						table_obfuscation = self.obfuscation[schema][table]
+						self.logger.info("Creating the table %s.%s " % (destination_schema, table, ))
+						self.pg_engine.create_obfuscated_table(table,  schema)
+						self.pg_engine.copy_obfuscated_table(table,  schema, table_obfuscation)
+						self.pg_engine.create_obfuscated_indices(table,  schema)
+						self.pg_engine.store_obfuscated_table(table,  schema)
+					except:
+						self.logger.error("Could not obfuscate the table  %s.%s " % (destination_schema,  table))
+				for table in clear_tables:
+					self.pg_engine.create_clear_view(schema, table)
+			except KeyError:
+				self.logger.warning("the schema %s doesn't exists" % (schema))
+				
 	def init_replica(self):
 		"""
 			The method performs a full init replica for the given sources
