@@ -2412,8 +2412,13 @@ class pg_engine(object):
 			schema_destination = self.schema_loading[schema]["destination"]
 			schema_loading_obfuscated = self.schema_loading[schema]["loading_obfuscated"]
 			schema_obfuscated = self.schema_loading[schema]["obfuscated"]
-			obfuscated_tables = [table for table in self.obfuscation[schema]]
-			clear_tables = [table for table in self.schema_tables[schema] if table not in self.obfuscation[schema]]
+			try:
+				obfuscated_tables = [table for table in self.obfuscation[schema]]
+				clear_tables = [table for table in self.schema_tables[schema] if table not in self.obfuscation[schema]]
+			except:
+				obfuscated_tables = []
+				clear_tables = [table for table in self.schema_tables[schema] ]
+			
 			for table in self.schema_tables[schema]:
 				self.logger.info("Swapping table %s.%s with %s.%s" % (schema_destination, table, schema_loading, table))
 				sql_drop_origin = sql.SQL("DROP TABLE IF EXISTS {}.{} CASCADE;").format(sql.Identifier(schema_destination),sql.Identifier(table))
