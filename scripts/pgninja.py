@@ -18,7 +18,9 @@ commands = [
 	'refresh_schema',
 	'sync_tables',
 	'start_replica', 
-	'stop_replica'
+	'stop_replica', 
+	'set_configuration_files', 
+	'show_errors'
 	]
 
 command_help = """Available commands, """ + ','.join(commands)
@@ -27,6 +29,7 @@ schema_help = """Specifies the schema within a source. If omitted all schemas fo
 source_help = """Specifies the source within a configuration. If omitted all sources are affected by the command."""
 tables_help = """Specifies the tables within a source . If omitted all tables are affected by the command."""
 debug_help = """Forces the debug mode with logging on stdout and log level debug."""
+logid_help = """Specifies the log id entry for displaying the error details"""
 version_help = """Displays pg_ninja's installed  version."""
 
 parser = argparse.ArgumentParser(description='Command line for pg_ninja.',  add_help=True)
@@ -35,6 +38,7 @@ parser.add_argument('--config', type=str,  default='default',  required=False, h
 parser.add_argument('--schema', type=str,  default='*',  required=False, help=schema_help)
 parser.add_argument('--source', type=str,  default='*',  required=False, help=source_help)
 parser.add_argument('--tables', type=str,  default='*',  required=False, help=tables_help)
+parser.add_argument('--logid', type=str,  default='*',  required=False, help=logid_help)
 parser.add_argument('--debug', default=False, required=False, help=debug_help, action='store_true')
 parser.add_argument('--version', action='version', help=version_help,version='pg_ninja {version}'.format(version=__version__))
 

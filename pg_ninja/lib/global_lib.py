@@ -25,6 +25,8 @@ class replica_engine(object):
 		"""
 			Class constructor.
 		"""
+		self.catalog_version = '2.0.0'
+		self.upgradable_version = '0.18'
 		self.lst_yes= ['yes',  'Yes', 'y', 'Y']
 		python_lib=get_python_lib()
 		cham_dir = "%s/.pg_ninja" % os.path.expanduser('~')	
@@ -68,7 +70,18 @@ class replica_engine(object):
 		self.mysql_source.logger = self.logger
 		self.mysql_source.sources = self.config["sources"]
 		self.mysql_source.type_override = self.config["type_override"]
-		
+		catalog_version = self.pg_engine.get_catalog_version()
+
+		#safety checks
+		if self.args.command == 'upgrade_replica_schema':
+			self.pg_engine.sources = self.config["sources"]
+			print("WARNING, entering upgrade mode. Disabling the catalogue version's check. Expected version %s, installed version %s" % (self.catalog_version, catalog_version))
+		else:
+			if  catalog_version:
+				if self.catalog_version != catalog_version:
+					print("FATAL, replica catalogue version mismatch. Expected %s, got %s" % (self.catalog_version, catalog_version))
+					sys.exit()
+
 		
 	def terminate_replica(self, signal, frame):
 		"""
@@ -304,7 +317,29 @@ class replica_engine(object):
 				self.logger.info("The tables %s within source %s will be synced." % (self.args.tables, self.args.source))
 				sync_daemon = Daemonize(app="sync_tables", pid=init_pid, action=self.mysql_source.sync_tables, foreground=foreground , keep_fds=keep_fds)
 				sync_daemon .start()
-	
+
+	def upgrade_replica_schema(self):
+		"""
+			The method upgrades an existing replica catalogue to the newer version.
+			If the catalogue is from the previous version
+		"""
+		catalog_version = self.pg_engine.get_catalog_version()
+		if catalog_version == self.catalog_version:
+			print("The replica catalogue is already up to date.")
+			sys.exit()
+		else:
+			if catalog_version == self.upgradable_version:
+				upg_msg = 'Upgrading the catalogue %s to the version %s.\n Are you sure? YES/No\n'  %  (catalog_version, self.catalog_version)
+				upg_cat = input(upg_msg)
+				if upg_cat == 'YES':
+					self.logger.info("Performing the upgrade")
+					self.pg_engine.upgrade_catalogue_v1()
+				elif upg_cat in  self.lst_yes:
+					print('Please type YES all uppercase to confirm')
+			elif catalog_version.split('.')[0] == '1':
+				print('Wrong starting version. Expected %s, got %s') % (catalog_version, self.upgradable_version)
+				sys.exit()
+
 	def update_schema_mappings(self):
 		"""
 			The method updates the schema mappings for the given source. 
@@ -440,6 +475,44 @@ class replica_engine(object):
 		else:
 			print("Couldn't complete the command. The pid file is not present in %s." % replica_pid)
 		
+	def show_errors(self):
+		"""
+			displays the error log entries if any.
+			If the source the error log is filtered for this source only.
+		"""
+		log_id = self.args.logid
+		self.pg_engine.source = self.args.source
+		log_error_data = self.pg_engine.get_log_data(log_id)
+		if log_error_data:
+			if log_id != "*":
+				tab_body = []
+				log_line = log_error_data[0]
+				tab_body.append(['Log id', log_line[0]])
+				tab_body.append(['Source name', log_line[1]])
+				tab_body.append(['ID Batch', log_line[2]])
+				tab_body.append(['Table', log_line[3]])
+				tab_body.append(['Schema', log_line[4]])
+				tab_body.append(['Error timestamp', log_line[5]])
+				tab_body.append(['SQL executed', log_line[6]])
+				tab_body.append(['Error message', log_line[7]])
+				print(tabulate(tab_body, tablefmt="simple"))
+			else:
+				tab_headers = ['Log id',  'Source name', 'ID Batch',  'Table', 'Schema' ,  'Error timestamp']
+				tab_body = []
+				for log_line in log_error_data:
+					log_id = log_line[0]
+					id_batch = log_line[1]
+					source_name = log_line[2]
+					table_name = log_line[3]
+					schema_name = log_line[4]
+					error_timestamp = log_line[5]
+					tab_row = [log_id, id_batch,source_name, table_name,   schema_name, error_timestamp]
+					tab_body.append(tab_row)
+				print(tabulate(tab_body, headers=tab_headers, tablefmt="simple"))
+		else:
+			print('There are no errors in the log')
+
+
 	def show_status(self):
 		"""
 			list the replica status using the configuration files and the replica catalogue 
