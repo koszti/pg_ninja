@@ -23,7 +23,6 @@ conf_files = (
 		[
 			'config/config-example.yaml', 
 			'config/obfuscation-example.yaml', 
-			'config/snapshots-example.yaml'
 		]
 	)
 
