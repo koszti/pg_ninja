@@ -55,7 +55,7 @@ class replica_engine(object):
 		#pg_engine instance initialisation
 		self.pg_engine = pg_engine()
 		self.pg_engine.dest_conn = self.config["pg_conn"]
-		self.logger = self.init_logger()
+		self.logger = self.__init_logger()
 		self.pg_engine.logger = self.logger
 		self.pg_engine.source = self.args.source
 		self.pg_engine.type_override = self.config["type_override"]
@@ -439,6 +439,7 @@ class replica_engine(object):
 				if self.config["log_dest"]  == 'stdout':
 					foreground = True
 				else:
+					self.logger = self.__init_logger()
 					foreground = False
 					print("Starting the replica process for source %s" % (self.args.source))
 					keep_fds = [self.logger_fds]
@@ -567,7 +568,7 @@ class replica_engine(object):
 				print("\n".join(tables_no_replica[2]))
 			
 			
-	def init_logger(self):
+	def __init_logger(self):
 		"""
 		The method initialise a new logger object using the configuration parameters.
 		The formatter is different if the debug option is enabler or not.
@@ -578,17 +579,22 @@ class replica_engine(object):
 		log_level = self.config["log_level"] 
 		log_dest = self.config["log_dest"] 
 		log_days_keep = self.config["log_days_keep"] 
-		log_name = self.args.config
+		config_name = self.args.config
+		source_name = self.args.source
 		debug_mode = self.args.debug
-
+		if source_name == '*':
+			log_name = "%s_general" % (config_name)
+		else:
+			log_name = "%s_%s" % (config_name, source_name)
+		
 		log_file = os.path.expanduser('%s/%s.log' % (log_dir,log_name))
 		logger = logging.getLogger(__name__)
 		logger.setLevel(logging.DEBUG)
 		logger.propagate = False
 		if debug_mode:
-			str_format = "[%(levelname)s] - (%(processName)s):  %(asctime)s: %(filename)s (%(lineno)s): %(message)s"
+			str_format = "%(asctime)s %(processName)s %(levelname)s %(filename)s (%(lineno)s): %(message)s"
 		else:
-			str_format = "[%(levelname)s] - %(processName)s:  %(asctime)s: : %(message)s"
+			str_format = "%(asctime)s %(processName)s %(levelname)s: %(message)s"
 		formatter = logging.Formatter(str_format, "%Y-%m-%d %H:%M:%S")
 		
 		if log_dest=='stdout' or debug_mode:
