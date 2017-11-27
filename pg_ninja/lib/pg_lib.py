@@ -2753,6 +2753,7 @@ class pg_engine(object):
 					
 			except:
 				self.rollback_upgrade_v1()
+				raise
 		else: 
 			self.logger.error("Sanity checks for the schema mappings failed. Aborting the upgrade")
 			self.rollback_upgrade_v1()
