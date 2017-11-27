@@ -2567,60 +2567,81 @@ class pg_engine(object):
 		sql_migrate_tables = """
 			WITH t_old_new AS
 				(
-				SELECT 
-					old.i_id_source as id_source_old,
-					new.i_id_source as id_source_new,
-					new.t_dest_schema
-				FROM 
-					_sch_ninja_version1.t_sources  old
-					INNER JOIN (
-							SELECT 
-								i_id_source,
-								(jsonb_each_text(jsb_schema_mappings)).value as t_dest_schema
-							FROM 
-								sch_ninja.t_sources
+					SELECT 
+						old.i_id_source as id_source_old,
+						new.i_id_source as id_source_new,
+						ARRAY[new.t_dest_schema,new.t_obf_schema] AS t_dest_schema
+					FROM 
+						_sch_ninja_version1.t_sources  old
+						INNER JOIN (
+							
+								SELECT 
+									i_id_source,
+									t_sch_map->>'obfuscate' as t_obf_schema,
+									t_sch_map->>'clear' as t_dest_schema
+									
+								FROM
+								(
+									SELECT 
+										i_id_source,
+										(jsonb_each_text(jsb_schema_mappings)).value::json as t_sch_map
 
-						   ) new 
-					ON old.t_dest_schema=new.t_dest_schema
+									FROM 
+										sch_ninja.t_sources
+								) sch
+
+							   ) new 
+						ON 	
+								old.t_dest_schema=new.t_dest_schema
+							AND	old.t_obf_schema=new.t_obf_schema
 				)
-			INSERT INTO sch_ninja.t_replica_tables
-				(
-					i_id_source,
+				INSERT INTO sch_ninja.t_replica_tables
+					(
+						i_id_source,
+						v_table_name,
+						v_schema_name,
+						v_table_pkey,
+						t_binlog_name,
+						i_binlog_position,
+						b_replica_enabled
+					)
+
+				SELECT distinct
+					id_source_new,
 					v_table_name,
-					v_schema_name,
-					v_table_pkey,
-					t_binlog_name,
-					i_binlog_position,
-					b_replica_enabled
-				)
+					unnest(t_dest_schema),
+					string_to_array(replace(v_table_pkey[1],'"',''),',') as table_pkey,
+					bat.t_binlog_name,
+					bat.i_binlog_position,
+					't'::boolean as b_replica_enabled
+					
+				FROM 
+					_sch_ninja_version1.t_replica_batch bat
+					INNER JOIN _sch_ninja_version1.t_replica_tables tab
+					ON tab.i_id_source=bat.i_id_source
+					
+					INNER JOIN t_old_new
+					ON tab.i_id_source=t_old_new.id_source_old
+				WHERE
+					NOT bat.b_processed
+				ORDER BY v_table_name
+			
+					;
 
-			SELECT 
-				id_source_new,
-				v_table_name,
-				t_dest_schema,
-				string_to_array(replace(v_table_pkey[1],'"',''),',') as table_pkey,
-				bat.t_binlog_name,
-				bat.i_binlog_position,
-				't'::boolean as b_replica_enabled
-				
-			FROM 
-				_sch_ninja_version1.t_replica_batch bat
-				INNER JOIN _sch_ninja_version1.t_replica_tables tab
-				ON tab.i_id_source=bat.i_id_source
-				
-				INNER JOIN t_old_new
-				ON tab.i_id_source=t_old_new.id_source_old
-			WHERE
-				NOT bat.b_processed
-		
-		;
+
 		"""
 		
 		sql_mapping = """
-		
 			WITH t_mapping AS
 				(
-					SELECT json_each_text(%s::json) AS t_sch_map
+					SELECT 
+						t_sch_map->>'obfuscate' as t_obf_schema,
+						t_sch_map->>'clear' as t_dest_schema
+						
+					FROM
+					(
+						SELECT (json_each_text(%s::json)).value::json AS t_sch_map
+					) sch
 				)
 
 			SELECT 
@@ -2630,19 +2651,19 @@ class pg_engine(object):
 			FROM
 			(
 				SELECT 
-					count(dst.t_sch_map) as mapped_schema,
-					string_agg((dst.t_sch_map).value,' ') as mapped_list
+					count(dst.t_dest_schema) as mapped_schema,
+					string_agg(dst.t_dest_schema,' ') as mapped_list
 				FROM
 					t_mapping dst 
 					INNER JOIN sch_ninja.t_sources src
 					ON 
-							src.t_dest_schema=(dst.t_sch_map).value
-						AND	src.t_source_schema= (dst.t_sch_map).key
+							src.t_dest_schema=dst.t_dest_schema
+						AND	src.t_obf_schema= dst.t_obf_schema
 			) cnt_map,
 			(
 				SELECT 
-					count(t_sch_map) as config_schema,
-					string_agg((t_sch_map).value,' ') as config_list
+					count(t_dest_schema) as config_schema,
+					string_agg(t_dest_schema,' ') as config_list
 				FROM
 					t_mapping 
 
@@ -2688,10 +2709,9 @@ class pg_engine(object):
 		self.logger.info("Checking if the schema mappings are correctly matched")
 		for source in self.sources:
 			schema_mappings = json.dumps(self.sources[source]["schema_mappings"])
-			print(schema_mappings)
-			sys.exit()
 			self.pgsql_cur.execute(sql_mapping, (schema_mappings, ))
 			config_mapping = self.pgsql_cur.fetchone()
+			print(config_mapping)
 			source_mapped = config_mapping[0]
 			list_mapped = config_mapping[1]
 			list_config = config_mapping[2]
