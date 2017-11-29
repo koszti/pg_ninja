@@ -895,6 +895,11 @@ class mysql_source(object):
 				table_obfuscation = None
 				size_insert=0
 				for row in binlogevent.rows:
+					event_after={}
+					event_before={}
+					event_insert = {}
+					event_obf = {}
+					
 					add_row = True
 					log_file=binlogfile
 					log_position=binlogevent.packet.log_pos
@@ -941,10 +946,9 @@ class mysql_source(object):
 										"log_table":log_table, 
 										"event_time":event_time
 									}
-					event_after={}
-					event_before={}
+					
 					if add_row:
-						event_insert = {}
+						
 						if isinstance(binlogevent, DeleteRowsEvent):
 							global_data["action"] = "delete"
 							event_after=row["values"]
