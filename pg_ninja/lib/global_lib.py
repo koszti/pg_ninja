@@ -361,6 +361,8 @@ class replica_engine(object):
 			The method reads the replica stream for the given source and stores the row images 
 			in the target postgresql database.
 		"""
+		self.load_obfuscation()
+		self.mysql_source.obfuscation = self.obfuscation
 		while True:
 			try:
 				self.mysql_source.read_replica()
@@ -398,6 +400,7 @@ class replica_engine(object):
 			It can be daemonised or run in foreground according with the --debug configuration or the log 
 			destination.
 		"""
+		
 		signal.signal(signal.SIGINT, self.terminate_replica)
 		queue = mp.Queue()
 		self.sleep_loop = self.config["sources"][self.args.source]["sleep_loop"]

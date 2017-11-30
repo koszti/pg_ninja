@@ -1842,7 +1842,7 @@ class pg_engine(object):
 			try:
 				obfdata = table_obfuscation[column[0]]
 				if obfdata["mode"] == "normal":
-					col_list.append("(substr(\"%s\"::text, %s , %s)||md5(\"%s\"))%s" %(column[0], obfdata["nonhash_start"], obfdata["nonhash_length"], column[0],  column[1]))
+					col_list.append("(substr(\"%s\"::text, %s , %s)||encode(public.digest(\"%s\",'sha256'),'hex'))%s" %(column[0], obfdata["nonhash_start"], obfdata["nonhash_length"], column[0],  column[1]))
 				elif obfdata["mode"] == "date":
 					col_list.append("to_char(\"%s\"::date,'YYYY-01-01')::date" % (column[0]))
 				elif obfdata["mode"] == "numeric":
