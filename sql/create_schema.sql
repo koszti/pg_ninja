@@ -19,6 +19,7 @@ CREATE TYPE sch_ninja.ty_replay_status
 	AS
 	(
 		b_continue boolean,
+		b_error  boolean,
 		v_table_error character varying[]
 	);
 
@@ -232,14 +233,14 @@ END
 $BODY$
 LANGUAGE plpgsql 
 ;
-
-CREATE OR REPLACE FUNCTION sch_ninja.fn_replay_mysql(integer,integer)
+CREATE OR REPLACE FUNCTION sch_ninja.fn_replay_mysql(integer,integer,boolean)
 RETURNS sch_ninja.ty_replay_status AS
 $BODY$
 	DECLARE
 		p_i_max_events	ALIAS FOR $1;
-		p_i_id_source	ALIAS FOR $2;
-		v_ty_status	sch_ninja.ty_replay_status;
+		p_i_id_source		ALIAS FOR $2;
+		p_b_exit_on_error	ALIAS FOR $3;
+		v_ty_status		sch_ninja.ty_replay_status;
 		v_r_statements	record;
 		v_i_id_batch	bigint;
 		v_t_ddl		text;
@@ -254,6 +255,7 @@ $BODY$
 	BEGIN
 		v_tab_enabled:=TRUE;
 		v_ty_status.b_continue:=FALSE;
+		v_ty_status.b_error:=FALSE;
 		v_i_replayed:=0;
 		v_i_ddl:=0;
 		v_i_skipped:=0;
@@ -510,22 +512,30 @@ $BODY$
 							WHERE 
 								log.i_id_event=v_r_statements.i_id_event
 						;
-						RAISE NOTICE 'Statement %', v_r_statements.t_sql;
-						UPDATE sch_ninja.t_replica_tables 
-							SET 
-								b_replica_enabled=FALSE
-						WHERE
-								v_schema_name=v_r_statements.v_schema_name
-							AND	v_table_name=v_r_statements.v_table_name
-						;
+						IF p_b_exit_on_error
+						THEN
+							v_ty_status.b_continue:=FALSE;
+							v_ty_status.b_error:=TRUE;
+							RETURN v_ty_status;
+						ELSE
+						
+							RAISE NOTICE 'Statement %', v_r_statements.t_sql;
+							UPDATE sch_ninja.t_replica_tables 
+								SET 
+									b_replica_enabled=FALSE
+							WHERE
+									v_schema_name=v_r_statements.v_schema_name
+								AND	v_table_name=v_r_statements.v_table_name
+							;
 
-						RAISE NOTICE 'Deleting the log entries for the table %.% ',v_r_statements.v_schema_name,v_r_statements.v_table_name;
-						DELETE FROM sch_ninja.t_log_replica  log
-						WHERE
-								v_table_name=v_r_statements.v_table_name
-							AND	v_schema_name=v_r_statements.v_schema_name
-							AND 	i_id_batch=v_i_id_batch
-						;
+							RAISE NOTICE 'Deleting the log entries for the table %.% ',v_r_statements.v_schema_name,v_r_statements.v_table_name;
+							DELETE FROM sch_ninja.t_log_replica  log
+							WHERE
+									v_table_name=v_r_statements.v_table_name
+								AND	v_schema_name=v_r_statements.v_schema_name
+								AND 	i_id_batch=v_i_id_batch
+							;
+						END IF;
 					END IF;
 					
 

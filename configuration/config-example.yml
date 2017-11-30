@@ -47,6 +47,7 @@ sources:
         copy_mode: 'file'  
         out_dir: /tmp
         sleep_loop: 1
+        on_error_replay: 'exit'
         obfuscation_file: '~/.pg_ninja/obfuscation/obfuscation-example.yml'
 
 # type_override allows the user to override the default type conversion into a different one. 
