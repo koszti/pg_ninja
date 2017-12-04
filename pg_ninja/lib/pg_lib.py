@@ -1,6 +1,7 @@
 import io
 import psycopg2
 from psycopg2 import sql
+from psycopg2.extras import RealDictCursor
 import sys
 import json
 import datetime
@@ -9,6 +10,8 @@ import time
 import binascii
 import os
 from distutils.sysconfig import get_python_lib
+import multiprocessing as mp
+
 
 class pg_encoder(json.JSONEncoder):
 	def default(self, obj):
@@ -21,7 +24,491 @@ class pg_encoder(json.JSONEncoder):
 					
 			return str(obj)
 		return json.JSONEncoder.default(self, obj)
+		
+class pgsql_source(object):
+	def __init__(self):
+		"""
+			Class constructor, the method sets the class variables and configure the
+			operating parameters from the args provided t the class.
+		"""
+		self.schema_tables = {}
+		self.schema_mappings = {}
+		self.schema_loading = {}
+		self.schema_list = []
+		self.schema_only = {}
+	
+	def __del__(self):
+		"""
+			Class destructor, tries to disconnect the postgresql connection.
+		"""
+		pass
 
+	def __set_copy_max_memory(self):
+		"""
+			The method sets the class variable self.copy_max_memory using the value stored in the 
+			source setting.
+
+		"""
+		copy_max_memory = str(self.source_config["copy_max_memory"])[:-1]
+		copy_scale = str(self.source_config["copy_max_memory"])[-1]
+		try:
+			int(copy_scale)
+			copy_max_memory = self.source_config["copy_max_memory"]
+		except:
+			if copy_scale =='k':
+				copy_max_memory = str(int(copy_max_memory)*1024)
+			elif copy_scale =='M':
+				copy_max_memory = str(int(copy_max_memory)*1024*1024)
+			elif copy_scale =='G':
+				copy_max_memory = str(int(copy_max_memory)*1024*1024*1024)
+			else:
+				print("**FATAL - invalid suffix in parameter copy_max_memory  (accepted values are (k)ilobytes, (M)egabytes, (G)igabytes.")
+				sys.exit(3)
+		self.copy_max_memory = copy_max_memory
+
+
+	def __init_sync(self):
+		"""
+			The method calls the common steps required to initialise the database connections and
+			class attributes within sync_tables,refresh_schema and init_replica.
+		"""
+		self.source_config = self.sources[self.source]
+		self.out_dir = self.source_config["out_dir"]
+		self.copy_mode = self.source_config["copy_mode"]
+		self.pg_engine.lock_timeout = self.source_config["lock_timeout"]
+		self.pg_engine.grant_select_to = self.source_config["grant_select_to"]
+		self.source_conn = self.source_config["db_conn"]
+		self.__set_copy_max_memory()
+		db_object = self.__connect_db( auto_commit=True, dict_cursor=True)
+		self.pgsql_conn = db_object["connection"]
+		self.pgsql_cursor = db_object["cursor"]
+		self.pg_engine.connect_db()
+		self.schema_mappings = self.pg_engine.get_schema_mappings()
+		self.pg_engine.schema_tables = self.schema_tables
+
+	
+	def __connect_db(self, auto_commit=True, dict_cursor=False):
+		"""
+			Connects to PostgreSQL using the parameters stored in self.dest_conn. The dictionary is built using the parameters set via adding the key dbname to the self.pg_conn dictionary.
+			This method's connection and cursors are widely used in the procedure except for the replay process which uses a 
+			dedicated connection and cursor.
+			
+			:return: a dictionary with the objects connection and cursor 
+			:rtype: dictionary
+		"""
+		if self.source_conn:
+			strconn = "dbname=%(database)s user=%(user)s host=%(host)s password=%(password)s port=%(port)s connect_timeout=%(connect_timeout)s"  % self.source_conn
+			pgsql_conn = psycopg2.connect(strconn)
+			pgsql_conn .set_client_encoding(self.source_conn["charset"])
+			if dict_cursor:
+				pgsql_cur = pgsql_conn .cursor(cursor_factory=RealDictCursor)
+			else:
+				pgsql_cur = pgsql_conn .cursor()
+			self.logger.debug("Changing the autocommit flag to %s" % auto_commit)
+			pgsql_conn.set_session(autocommit=auto_commit)
+
+		elif not self.source_conn:
+			self.logger.error("Undefined database connection string. Exiting now.")
+			sys.exit()
+		
+		return {'connection': pgsql_conn, 'cursor': pgsql_cur }
+	
+	def __export_snapshot(self, queue):
+		"""
+			The method exports a database snapshot and stays idle in transaction until a message from the parent
+			process tell it to exit.
+			The method stores the snapshot id in the queue for the parent's usage.
+			
+			:param queue: the queue object used to exchange messages between the parent and the child
+		"""
+		self.logger.debug("exporting database snapshot for source %s" % self.source)
+		sql_snap = """
+			BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+			SELECT pg_export_snapshot();
+		"""
+		db_snap = self.__connect_db(False)
+		db_conn = db_snap["connection"]
+		db_cursor = db_snap["cursor"]
+		db_cursor.execute(sql_snap)
+		snapshot_id = db_cursor.fetchone()[0]
+		queue.put(snapshot_id)
+		continue_loop = True
+		while continue_loop:
+			continue_loop = queue.get()
+			time.sleep(5)
+		db_conn.commit()
+		
+	def __build_table_exceptions(self):
+		"""
+			The method builds two dictionaries from the limit_tables and skip tables values set for the source.
+			The dictionaries are intended to be used in the get_table_list to cleanup the list of tables per schema.
+			The method manages the particular case of when the class variable self.tables is set.
+			In that case only the specified tables in self.tables will be synced. Should limit_tables be already 
+			set, then the resulting list is the intersection of self.tables and limit_tables.
+		"""
+		self.limit_tables = {}
+		self.skip_tables = {}
+		limit_tables = self.source_config["limit_tables"]
+		skip_tables = self.source_config["skip_tables"]
+		
+		if self.tables !='*':
+			tables = [table.strip() for table in self.tables.split(',')]
+			if limit_tables:
+				limit_tables = [table for table in tables if table in limit_tables]
+			else:
+				limit_tables = tables
+			self.schema_only = {table.split('.')[0] for table in limit_tables}
+			
+		
+		if limit_tables:
+			table_limit = [table.split('.') for table in limit_tables]
+			for table_list in table_limit:
+				list_exclude = []
+				try:
+					list_exclude = self.limit_tables[table_list[0]] 
+					list_exclude.append(table_list[1])
+				except KeyError:
+					list_exclude.append(table_list[1])
+				self.limit_tables[table_list[0]]  = list_exclude
+		if skip_tables:
+			table_skip = [table.split('.') for table in skip_tables]		
+			for table_list in table_skip:
+				list_exclude = []
+				try:
+					list_exclude = self.skip_tables[table_list[0]] 
+					list_exclude.append(table_list[1])
+				except KeyError:
+					list_exclude.append(table_list[1])
+				self.skip_tables[table_list[0]]  = list_exclude
+		
+
+
+	def __get_table_list(self):
+		"""
+			The method pulls the table list from the information_schema. 
+			The list is stored in a dictionary  which key is the table's schema.
+		"""
+		sql_tables="""
+			SELECT 
+				table_name
+			FROM 
+				information_schema.TABLES 
+			WHERE 
+					table_type='BASE TABLE' 
+				AND table_schema=%s
+			;
+		"""
+		for schema in self.schema_list:
+			self.pgsql_cursor.execute(sql_tables, (schema, ))
+			table_list = [table["table_name"] for table in self.pgsql_cursor.fetchall()]
+			try:
+				limit_tables = self.limit_tables[schema]
+				if len(limit_tables) > 0:
+					table_list = [table for table in table_list if table in limit_tables]
+			except KeyError:
+				pass
+			try:
+				skip_tables = self.skip_tables[schema]
+				if len(skip_tables) > 0:
+					table_list = [table for table in table_list if table not in skip_tables]
+			except KeyError:
+				pass
+			
+			self.schema_tables[schema] = table_list
+	
+	def __create_destination_schemas(self):
+		"""
+			Creates the loading schemas in the destination database and associated tables listed in the dictionary
+			self.schema_tables.
+			The method builds a dictionary which associates the destination schema to the loading schema. 
+			The loading_schema is named after the destination schema plus with the prefix _ and the _tmp suffix.
+			As postgresql allows, by default up to 64  characters for an identifier, the original schema is truncated to 59 characters,
+			in order to fit the maximum identifier's length.
+			The mappings are stored in the class dictionary schema_loading.
+		"""
+		for schema in self.schema_list:
+			destination_schema = self.schema_mappings[schema]["clear"]
+			obfuscated_schema = self.schema_mappings[schema]["obfuscate"]
+			loading_schema = "_%s_tmp" % destination_schema[0:59]
+			loading_obfuscated = "_%s_tmp" % obfuscated_schema[0:59]
+			self.schema_loading[schema] = {'destination':destination_schema, 'loading':loading_schema, 'obfuscated': obfuscated_schema, 'loading_obfuscated': loading_obfuscated}
+			self.logger.debug("Creating the loading schema %s." % loading_schema)
+			self.pg_engine.create_database_schema(loading_schema)
+			self.logger.debug("Creating the destination schema %s." % destination_schema)
+			self.pg_engine.create_database_schema(destination_schema)
+			self.logger.debug("Creating the obfuscated schema %s." % obfuscated_schema)
+			self.pg_engine.create_database_schema(obfuscated_schema)
+			self.logger.debug("Creating the loading obfuscated schema %s." % loading_obfuscated)
+			self.pg_engine.create_database_schema(loading_obfuscated)
+
+	def __get_table_metadata(self, table, schema):
+		"""
+			The method builds the table's metadata querying the information_schema.
+			The data is returned as a dictionary.
+			
+			:param table: The table name
+			:param schema: The table's schema
+			:return: table's metadata as a cursor dictionary
+			:rtype: dictionary
+		"""
+		sql_metadata="""
+			SELECT
+				col.attname as column_name,
+				(
+					SELECT 
+						pg_catalog.pg_get_expr(def.adbin, def.adrelid)
+					FROM 
+						pg_catalog.pg_attrdef def
+					WHERE 
+							def.adrelid = col.attrelid 
+						AND def.adnum = col.attnum 
+						AND col.atthasdef
+				) as column_default,
+				col.attnum as ordinal_position,
+				CASE 
+					WHEN typ.typcategory ='E'
+					THEN 
+						'enum'
+					WHEN typ.typcategory='C'
+					THEN
+						'composite' 
+					
+				ELSE
+					pg_catalog.format_type(col.atttypid, col.atttypmod)
+				END
+				AS type_format,
+				(
+					SELECT 
+						pg_get_serial_sequence(format('%%I.%%I',tabsch.nspname,tab.relname), col.attname) IS NOT NULL
+					FROM 
+						pg_catalog.pg_class tab
+						INNER JOIN pg_catalog.pg_namespace tabsch
+						ON	tab.relnamespace=tabsch.oid
+					WHERE
+						tab.oid=col.attrelid
+				) as col_serial,
+				typ.typcategory as type_category,
+				CASE
+					WHEN typ.typcategory='E'
+					THEN
+					(
+						SELECT 
+							string_agg(quote_literal(enumlabel),',') 
+						FROM 
+							pg_catalog.pg_enum enm 
+						WHERE enm.enumtypid=typ.oid 
+					)
+					WHEN typ.typcategory='C'
+					THEN 
+					(
+						SELECT 
+							string_agg(
+								format('%%I %%s',
+									attname,
+									pg_catalog.format_type(atttypid, atttypmod)
+								)
+							,
+							','
+							)	 
+						FROM 
+							pg_catalog.pg_attribute 
+						WHERE 
+							attrelid=format(
+								'%%I.%%I',
+								sch.nspname,
+								typ.typname)::regclass
+							)
+				END AS typ_elements,
+				col.attnotnull as not_null
+			FROM 
+				pg_catalog.pg_attribute col
+				INNER JOIN pg_catalog.pg_type typ
+					ON  col.atttypid=typ.oid
+				INNER JOIN pg_catalog.pg_namespace sch
+					ON typ.typnamespace=sch.oid
+			WHERE 
+					col.attrelid = %s::regclass 
+				AND NOT col.attisdropped
+				AND col.attnum>0
+			ORDER BY 
+				col.attnum
+			;
+			;
+		"""
+		tab_regclass = '"%s"."%s"' % (schema, table)
+		self.pgsql_cursor.execute(sql_metadata, (tab_regclass, ))
+		table_metadata=self.pgsql_cursor.fetchall()
+		return table_metadata
+
+
+	def __create_destination_tables(self):
+		"""
+			The method creates the destination tables in the loading schema.
+			The tables names are looped using the values stored in the class dictionary schema_tables.
+		"""
+		for schema in self.schema_tables:
+			table_list = self.schema_tables[schema]
+			for table in table_list:
+				table_metadata = self.__get_table_metadata(table, schema)
+				self.pg_engine.create_table(table_metadata, table, schema, 'pgsql')
+	
+	def __drop_loading_schemas(self):
+		"""
+			The method drops the loading schemas from the destination database.
+			The drop is performed on the schemas generated in create_destination_schemas. 
+			The method assumes the class dictionary schema_loading is correctly set.
+		"""
+		for schema in self.schema_loading:
+			loading_schema = self.schema_loading[schema]["loading"]
+			self.logger.debug("Dropping the schema %s." % loading_schema)
+			self.pg_engine.drop_database_schema(loading_schema, True)
+	
+	def __copy_data(self, schema, table, db_copy):
+		
+		sql_snap = """
+			BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+			SET TRANSACTION SNAPSHOT %s;
+		"""
+		out_file = '%s/%s_%s.csv' % (self.out_dir, schema, table )
+		loading_schema = self.schema_loading[schema]["loading"]
+		from_table = '"%s"."%s"' % (schema, table)
+		to_table = '"%s"."%s"' % (loading_schema, table)
+		
+		db_conn = db_copy["connection"]
+		db_cursor = db_copy["cursor"]
+		
+		db_cursor.execute(sql_snap, (self.snapshot_id, ))
+		self.logger.debug("exporting table %s.%s in %s" % (schema , table,  out_file))
+		copy_file = open(out_file, 'wb')
+		db_cursor.copy_to(copy_file, from_table)
+		
+		copy_file.close()
+		self.logger.debug("loading the file %s in table %s.%s " % (out_file,  loading_schema , table,  ))
+		
+		copy_file = open(out_file, 'rb')
+		self.pg_engine.pgsql_cur.copy_from(copy_file, to_table)
+		copy_file.close()
+		db_conn.commit()
+		try:
+			remove(out_file)
+		except:
+			pass
+		
+	
+	
+	def __create_indices(self):
+		"""
+			The method loops over the tables, queries the origin's database and creates the same indices
+			on the loading schema.
+		"""
+		db_copy = self.__connect_db(False)
+		db_conn = db_copy["connection"]
+		db_cursor = db_copy["cursor"]
+		sql_get_idx = """
+			SELECT 
+				CASE
+					WHEN con.conname IS NOT NULL
+					THEN
+						format('ALTER TABLE %%I ADD CONSTRAINT %%I %%s ;',tab.relname,con.conname,pg_get_constraintdef(con.oid))
+					ELSE
+						format('%%s ;',regexp_replace(pg_get_indexdef(idx.oid), '("?\w+"?\.)', ''))
+				END AS ddl_text,
+				CASE
+					WHEN con.conname IS NOT NULL
+					THEN
+						format('Adding primary key to table %%I',tab.relname)
+					ELSE
+						format('Adding index %%I to table %%I',idx.relname,tab.relname)
+				END AS ddl_msg
+			FROM
+
+				pg_class tab 
+				INNER JOIN pg_namespace sch
+				ON	
+					sch.oid=tab.relnamespace
+				INNER JOIN pg_index ind
+				ON
+					ind.indrelid=tab.oid
+				INNER JOIN pg_class idx
+				ON
+					ind.indexrelid=idx.oid
+				LEFT OUTER JOIN pg_constraint con
+				ON
+						con.conrelid=tab.oid
+					AND	idx.oid=con.conindid
+				
+			WHERE
+				(		
+						contype='p' 
+					OR 	contype IS NULL
+				)
+				AND	tab.relname=%s
+				AND	sch.nspname=%s
+			;
+		"""
+		
+		for schema in self.schema_tables:
+			table_list = self.schema_tables[schema]
+			for table in table_list:
+				loading_schema = self.schema_loading[schema]["loading"]
+				self.pg_engine.pgsql_cur.execute('SET search_path=%s;', (loading_schema, ))
+				db_cursor.execute(sql_get_idx, (table, schema))
+				idx_tab = db_cursor.fetchall()
+				for idx in idx_tab:
+					self.logger.info(idx[1])
+					try:
+						self.pg_engine.pgsql_cur.execute(idx[0])
+					except:
+						self.logger.error("an error occcurred when executing %s" %(idx[0]))
+					
+		
+		db_conn.close()
+		
+	def __copy_tables(self):
+		"""
+			The method copies the data between tables, from the postgres source and the corresponding
+			postgresql loading schema. Before the process starts a snapshot is exported in order to get
+			a consistent database copy at the time of the snapshot.
+		"""
+		
+		queue = mp.Queue()
+		snap_exp = mp.Process(target=self.__export_snapshot, args=(queue,), name='snap_export',daemon=True)
+		snap_exp.start()
+		self.snapshot_id = queue.get()
+		db_copy = self.__connect_db(False)
+		
+		for schema in self.schema_tables:
+			table_list = self.schema_tables[schema]
+			for table in table_list:
+				self.__copy_data(schema, table, db_copy)
+		queue.put(False)
+		db_copy["connection"].close()
+	
+	def init_replica(self):
+		"""
+			The method performs a full init replica for the given source
+		"""
+		self.logger.debug("starting init replica for source %s" % self.source)
+		self.__init_sync()
+		self.schema_list = [schema for schema in self.schema_mappings]
+		self.__build_table_exceptions()
+		self.__get_table_list()
+		self.__create_destination_schemas()
+		self.pg_engine.schema_loading = self.schema_loading
+		self.pg_engine.set_source_status("initialising")
+		try:
+			self.__create_destination_tables()
+			self.__copy_tables()
+			self.__create_indices()
+			self.pg_engine.grant_select()
+			self.pg_engine.swap_schemas()
+			self.__drop_loading_schemas()
+			self.pg_engine.set_source_status("initialised")
+		except:
+			self.__drop_loading_schemas()
+			self.pg_engine.set_source_status("error")
+			raise
+		
 
 class pg_engine(object):
 	def __init__(self):
@@ -192,7 +679,35 @@ class pg_engine(object):
 			inc_dic[dic_key] = tab_dic
 		return inc_dic
 	
-	
+	def grant_select(self):
+		"""
+			The method grants the select permissions on all the tables on the replicated schemas to the database roles
+			listed in the source's variable grant_select_to.
+			In the case a role doesn't exist the method emits an error message and skips the missing user.
+		"""
+		if self.grant_select_to:
+			for schema in  self.schema_loading:
+				schema_loading = self.schema_loading[schema]["loading"]
+				self.logger.info("Granting select on tables in schema %s to the role(s) %s." % (schema_loading,','.join(self.grant_select_to)))
+				for db_role in self.grant_select_to:
+					sql_grant_usage = sql.SQL("GRANT USAGE ON SCHEMA {} TO {};").format(sql.Identifier(schema_loading), sql.Identifier(db_role))
+					sql_alter_default_privs = sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT SELECT ON TABLES TO {};").format(sql.Identifier(schema_loading), sql.Identifier(db_role))
+					try:
+						self.pgsql_cur.execute(sql_grant_usage)
+						self.pgsql_cur.execute(sql_alter_default_privs)
+						for table in self.schema_tables[schema]:
+							self.logger.info("Granting select on table %s.%s to the role %s." % (schema_loading, table,db_role))
+							sql_grant_select = sql.SQL("GRANT SELECT ON TABLE {}.{} TO {};").format(sql.Identifier(schema_loading), sql.Identifier(table), sql.Identifier(db_role))
+							try:
+								self.pgsql_cur.execute(sql_grant_select)
+							except psycopg2.Error as er:
+								self.logger.error("SQLCODE: %s SQLERROR: %s" % (er.pgcode, er.pgerror))
+					except psycopg2.Error as e:
+						if e.pgcode == "42704":
+							self.logger.warning("The role %s does not exist" % (db_role, ))
+						else:
+							self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
+
 	def replay_replica(self):
 		"""
 			The method replays the row images in the target database using the function 
@@ -922,10 +1437,74 @@ class pg_engine(object):
 		schema_list = [schema[0] for schema in self.pgsql_cur.fetchall()]
 		self.logger.debug("Found origin's replication schemas %s" % ', '.join(schema_list))
 		return schema_list
-	
-	def build_create_table(self, table_metadata,table_name,  schema, temporary_schema=True):
+
+	def __build_create_table_pgsql(self, table_metadata,table_name,  schema, temporary_schema=True):
 		"""
-			The method builds the create table statement with any enumeration associated.
+			The method builds the create table statement with any enumeration or composite type associated to the table
+			using the postgresql's metadata.
+			The returned value is a dictionary with the optional composite type/enumeration's ddl with the create table without indices or primary keys.
+			The method assumes there is a database connection active.
+			
+			:param table_metadata: the column dictionary extracted from the source's information_schema or builty by the sql_parser class
+			:param table_name: the table name 
+			:param destination_schema: the schema where the table belongs
+			:return: a dictionary with the optional create statements for enumerations and the create table
+			:rtype: dictionary
+		"""
+		table_ddl = {}
+		ddl_columns = []
+		def_columns = ''
+		if temporary_schema:
+			destination_schema = self.schema_loading[schema]["loading"]
+		else:
+			destination_schema = schema
+		ddl_head = 'CREATE TABLE "%s"."%s" (' % (destination_schema, table_name)
+		ddl_tail = ");"
+		ddl_enum=[]
+		ddl_composite=[]
+		for column in table_metadata:
+			column_name = column["column_name"]
+			if column["column_default"]:
+				default_value = column["column_default"]
+			else:
+				default_value = ''
+			if column["not_null"]:
+				col_is_null="NOT NULL"
+			else:
+				col_is_null="NULL"
+			column_type = column["type_format"]
+			if column_type == "enum":
+				enum_type = '"%s"."enum_%s_%s"' % (destination_schema, table_name[0:20], column["column_name"][0:20])
+				sql_drop_enum = 'DROP TYPE IF EXISTS %s CASCADE;' % enum_type
+				sql_create_enum = 'CREATE TYPE %s AS ENUM (%s);' % ( enum_type,  column["typ_elements"])
+				ddl_enum.append(sql_drop_enum)
+				ddl_enum.append(sql_create_enum)
+				column_type=enum_type
+			if column_type == "composite":
+				composite_type = '"%s"."typ_%s_%s"' % (destination_schema, table_name[0:20], column["column_name"][0:20])
+				sql_drop_composite = 'DROP TYPE IF EXISTS %s CASCADE;' % composite_type
+				sql_create_composite = 'CREATE TYPE %s AS (%s);' % ( composite_type,  column["typ_elements"])
+				ddl_composite.append(sql_drop_composite)
+				ddl_composite.append(sql_create_composite)
+				column_type=composite_type
+			if column["col_serial"]:
+				default_value = ''
+				if column_type == 'bigint':
+					column_type = 'bigserial'
+				else:
+					column_type = 'serial'
+				default_value = ''
+			ddl_columns.append('"%s" %s %s %s' % (column_name, column_type, default_value, col_is_null))
+		def_columns=str(',').join(ddl_columns)
+		table_ddl["enum"] = ddl_enum
+		table_ddl["composite"] = ddl_composite
+		table_ddl["table"] = (ddl_head+def_columns+ddl_tail)
+		return table_ddl
+
+
+	def __build_create_table_mysql(self, table_metadata,table_name,  schema, temporary_schema=True):
+		"""
+			The method builds the create table statement with any enumeration associated using the mysql's metadata.
 			The returned value is a dictionary with the optional enumeration's ddl and the create table without indices or primary keys.
 			on the destination schema specified by destination_schema.
 			The method assumes there is a database connection active.
@@ -967,6 +1546,7 @@ class pg_engine(object):
 			ddl_columns.append(  ' "%s" %s %s   ' %  (column["column_name"], column_type, col_is_null ))
 		def_columns=str(',').join(ddl_columns)
 		table_ddl["enum"] = ddl_enum
+		table_ddl["composite"] = []
 		table_ddl["table"] = (ddl_head+def_columns+ddl_tail)
 		return table_ddl
 	
@@ -1520,19 +2100,29 @@ class pg_engine(object):
 		self.pgsql_cur.execute(sql_save,(batch_id, schema, table,b64_row))
 	
 	
-	def create_table(self,  table_metadata,table_name,  schema):
+	def create_table(self,  table_metadata,table_name,  schema, metadata_type):
 		"""
 			Executes the create table returned by build_create_table on the destination_schema.
 			
 			:param table_metadata: the column dictionary extracted from the source's information_schema or builty by the sql_parser class
 			:param table_name: the table name 
 			:param destination_schema: the schema where the table belongs
+			:param metadata_type: the metadata type, currently supported mysql and pgsql
 		"""
-		table_ddl = self.build_create_table( table_metadata,table_name,  schema)
+		if metadata_type == 'mysql':
+			table_ddl = self.__build_create_table_mysql( table_metadata,table_name,  schema)
+		elif metadata_type == 'pgsql':
+			table_ddl = self.__build_create_table_pgsql( table_metadata,table_name,  schema)
 		enum_ddl = table_ddl["enum"] 
+		composite_ddl = table_ddl["composite"] 
 		table_ddl = table_ddl["table"] 
+		
 		for enum_statement in enum_ddl:
 			self.pgsql_cur.execute(enum_statement)
+		
+		for composite_statement in composite_ddl:
+			self.pgsql_cur.execute(composite_statement)
+
 		self.pgsql_cur.execute(table_ddl)
 	
 	

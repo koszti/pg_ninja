@@ -8,7 +8,7 @@ import signal
 from shutil import copy
 from distutils.sysconfig import get_python_lib
 from tabulate import tabulate
-from pg_ninja import pg_engine, mysql_source
+from pg_ninja import pg_engine, mysql_source, pgsql_source
 import logging
 from logging.handlers  import TimedRotatingFileHandler
 from daemonize import Daemonize
@@ -71,6 +71,17 @@ class replica_engine(object):
 		self.mysql_source.logger = self.logger
 		self.mysql_source.sources = self.config["sources"]
 		self.mysql_source.type_override = self.config["type_override"]
+		catalog_version = self.pg_engine.get_catalog_version()
+
+		#pgsql_source instance initialisation
+		self.pgsql_source = pgsql_source()
+		self.pgsql_source.source = self.args.source
+		self.pgsql_source.tables = self.args.tables
+		self.pgsql_source.schema = self.args.schema.strip()
+		self.pgsql_source.pg_engine = self.pg_engine
+		self.pgsql_source.logger = self.logger
+		self.pgsql_source.sources = self.config["sources"]
+		self.pgsql_source.type_override = self.config["type_override"]
 		catalog_version = self.pg_engine.get_catalog_version()
 
 		#safety checks
@@ -247,19 +258,51 @@ class replica_engine(object):
 			self.stop_replica()
 			self.load_obfuscation()
 			self.mysql_source.obfuscation = self.obfuscation
-			if self.args.debug:
-				self.mysql_source.init_replica()
+			source_type = self.config["sources"][self.args.source]["type"]
+			if source_type  == "mysql":
+				self.__init_mysql_replica()
+			elif source_type  == "pgsql":
+				self.__init_pgsql_replica()
+			
+	def __init_mysql_replica(self):
+		"""
+			The method  initialise a replica for a given mysql source within the specified configuration. 
+			The method is called by the public method init_replica.
+		"""
+		
+		if self.args.debug:
+			self.mysql_source.init_replica()
+		else:
+			if self.config["log_dest"]  == 'stdout':
+				foreground = True
 			else:
-				if self.config["log_dest"]  == 'stdout':
-					foreground = True
-				else:
-					foreground = False
-					print("Init replica process for source %s started." % (self.args.source))
-				keep_fds = [self.logger_fds]
-				init_pid = os.path.expanduser('%s/%s.pid' % (self.config["pid_dir"],self.args.source))
-				self.logger.info("Initialising the replica for source %s" % self.args.source)
-				init_daemon = Daemonize(app="init_replica", pid=init_pid, action=self.mysql_source.init_replica, foreground=foreground , keep_fds=keep_fds)
-				init_daemon.start()
+				foreground = False
+				print("Init replica process for source %s started." % (self.args.source))
+			keep_fds = [self.logger_fds]
+			init_pid = os.path.expanduser('%s/%s.pid' % (self.config["pid_dir"],self.args.source))
+			self.logger.info("Initialising the replica for source %s" % self.args.source)
+			init_daemon = Daemonize(app="init_replica", pid=init_pid, action=self.mysql_source.init_replica, foreground=foreground , keep_fds=keep_fds)
+			init_daemon.start()
+
+	def __init_pgsql_replica(self):
+		"""
+			The method  initialise a replica for a given postgresql source within the specified configuration. 
+			The method is called by the public method init_replica.
+		"""
+		
+		if self.args.debug:
+			self.pgsql_source.init_replica()
+		else:
+			if self.config["log_dest"]  == 'stdout':
+				foreground = True
+			else:
+				foreground = False
+				print("Init replica process for source %s started." % (self.args.source))
+			keep_fds = [self.logger_fds]
+			init_pid = os.path.expanduser('%s/%s.pid' % (self.config["pid_dir"],self.args.source))
+			self.logger.info("Initialising the replica for source %s" % self.args.source)
+			init_daemon = Daemonize(app="init_replica", pid=init_pid, action=self.pgsql_source.init_replica, foreground=foreground , keep_fds=keep_fds)
+			init_daemon.start()
 
 	def refresh_schema(self):
 		"""

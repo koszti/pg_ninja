@@ -268,7 +268,7 @@ class mysql_source(object):
 			table_list = self.schema_tables[schema]
 			for table in table_list:
 				table_metadata = self.get_table_metadata(table, schema)
-				self.pg_engine.create_table(table_metadata, table, schema)
+				self.pg_engine.create_table(table_metadata, table, schema, 'mysql')
 	
 	
 	def generate_select_statements(self, schema, table):

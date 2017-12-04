@@ -49,6 +49,7 @@ sources:
         sleep_loop: 1
         on_error_replay: 'exit'
         obfuscation_file: '~/.pg_ninja/obfuscation/obfuscation-example.yml'
+        type: mysql
 
 # type_override allows the user to override the default type conversion into a different one. 
 # override_to specifies the destination type which must be a postgresql type and the type cast should be possible
