@@ -42,6 +42,34 @@ class pgsql_source(object):
 			Class destructor, tries to disconnect the postgresql connection.
 		"""
 		pass
+	
+	def __init_obfuscation(self):
+		"""
+			The method initialises the obfuscation into the obfuscated loading schema. 
+			No swap is performed in this method though.
+		"""
+		self.logger.info("building obfuscation for source %s" % self.source)
+		for schema in self.obfuscate_schemas:
+			try:
+				clear_tables = [table for table in self.schema_tables[schema] if table not in self.obfuscation[schema]]
+				destination_schema = self.schema_loading[schema]["loading_obfuscated"]
+				self.logger.info("processing schema %s into %s" % (schema, destination_schema))
+				for table in self.obfuscation[schema]:
+					try:
+						table_obfuscation = self.obfuscation[schema][table]
+						self.logger.info("Creating the table %s.%s " % (destination_schema, table, ))
+						self.pg_engine.create_obfuscated_table(table,  schema)
+						self.pg_engine.copy_obfuscated_table(table,  schema, table_obfuscation)
+						self.pg_engine.create_obfuscated_indices(table,  schema)
+						
+					except:
+						self.logger.error("Could not obfuscate the table  %s.%s " % (destination_schema,  table))
+					
+				for table in clear_tables:
+					self.pg_engine.create_clear_view(schema, table)
+			except KeyError:
+				self.logger.warning("the schema %s doesn't exists" % (schema))
+
 
 	def __set_copy_max_memory(self):
 		"""
@@ -85,6 +113,9 @@ class pgsql_source(object):
 		self.pg_engine.connect_db()
 		self.schema_mappings = self.pg_engine.get_schema_mappings()
 		self.pg_engine.schema_tables = self.schema_tables
+		if self.obfuscation:
+			self.obfuscate_schemas = [schema for schema in self.obfuscation]
+		
 
 	
 	def __connect_db(self, auto_commit=True, dict_cursor=False):
@@ -360,8 +391,11 @@ class pgsql_source(object):
 		"""
 		for schema in self.schema_loading:
 			loading_schema = self.schema_loading[schema]["loading"]
-			self.logger.debug("Dropping the schema %s." % loading_schema)
+			loading_obfuscated = self.schema_loading[schema]["loading_obfuscated"]
+			self.logger.debug("Dropping the loading clear schema %s." % loading_schema)
 			self.pg_engine.drop_database_schema(loading_schema, True)
+			self.logger.debug("Dropping the obfuscated obfuscated schema %s." % loading_obfuscated)
+			self.pg_engine.drop_database_schema(loading_obfuscated, True)
 	
 	def __copy_data(self, schema, table, db_copy):
 		
@@ -500,6 +534,8 @@ class pgsql_source(object):
 			self.__create_destination_tables()
 			self.__copy_tables()
 			self.__create_indices()
+			if self.obfuscation:
+				self.__init_obfuscation()
 			self.pg_engine.grant_select()
 			self.pg_engine.swap_schemas()
 			self.__drop_loading_schemas()

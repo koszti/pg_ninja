@@ -257,11 +257,12 @@ class replica_engine(object):
 		else:
 			self.stop_replica()
 			self.load_obfuscation()
-			self.mysql_source.obfuscation = self.obfuscation
 			source_type = self.config["sources"][self.args.source]["type"]
 			if source_type  == "mysql":
+				self.mysql_source.obfuscation = self.obfuscation
 				self.__init_mysql_replica()
 			elif source_type  == "pgsql":
+				self.pgsql_source.obfuscation = self.obfuscation
 				self.__init_pgsql_replica()
 			
 	def __init_mysql_replica(self):
