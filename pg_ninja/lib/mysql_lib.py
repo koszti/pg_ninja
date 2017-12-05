@@ -884,10 +884,13 @@ class mysql_source(object):
 									"log_table":log_table
 								}
 								self.pg_engine.write_ddl(token, query_data, destination_schema, obfuscated_schema)
+						close_batch=True
+							
 						
 					sql_tokeniser.reset_lists()
-					my_stream.close()
-					return [master_data, close_batch]
+					if close_batch:
+						my_stream.close()
+						return [master_data, close_batch]
 			else:
 				table_obfuscation = None
 				size_insert=0
