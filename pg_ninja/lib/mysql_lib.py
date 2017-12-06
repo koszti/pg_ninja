@@ -884,7 +884,7 @@ class mysql_source(object):
 									"log_table":log_table
 								}
 								self.pg_engine.write_ddl(token, query_data, destination_schema, obfuscated_schema)
-						close_batch=True
+					close_batch=True
 							
 						
 					sql_tokeniser.reset_lists()
