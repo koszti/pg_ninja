@@ -842,8 +842,9 @@ class mysql_source(object):
 					schema_query = binlogevent.schema.decode()
 				except:
 					schema_query = binlogevent.schema
-				
+				#self.logger.info("CAPTURED QUERY EVENT - %s " % (binlogevent.query))
 				if binlogevent.query.strip().upper() not in self.statement_skip and schema_query in self.schema_mappings: 
+					close_batch=True
 					destination_schema = self.schema_mappings[schema_query]["clear"]
 					obfuscated_schema = self.schema_mappings[schema_query]["obfuscate"]
 					log_position = binlogevent.packet.log_pos
@@ -884,13 +885,14 @@ class mysql_source(object):
 									"log_table":log_table
 								}
 								self.pg_engine.write_ddl(token, query_data, destination_schema, obfuscated_schema)
-					close_batch=True
+								
 							
 						
 					sql_tokeniser.reset_lists()
-					if close_batch:
-						my_stream.close()
-						return [master_data, close_batch]
+				if close_batch:
+					my_stream.close()
+					return [master_data, close_batch]
+				
 			else:
 				table_obfuscation = None
 				size_insert=0
