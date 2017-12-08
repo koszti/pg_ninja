@@ -2544,18 +2544,22 @@ class pg_engine(object):
 						"""
 						self.pgsql_cur.execute(sql_delete, (self.i_id_source,old_mapping ))
 					elif old_mapping != new_mapping:
-						self.logger.debug("Updating mapping for schema %s. Old: %s. New: %s" % (schema, old_mapping, new_mapping))
-						sql_tables = """
-							UPDATE sch_ninja.t_replica_tables 
-								SET v_schema_name=%s
-							WHERE 	
-									i_id_source=%s
-								AND	v_schema_name=%s
-							;
-						"""
-						self.pgsql_cur.execute(sql_tables, (new_mapping, self.i_id_source,old_mapping ))
-						sql_alter_schema = sql.SQL("ALTER SCHEMA {} RENAME TO {};").format(sql.Identifier(old_mapping), sql.Identifier(new_mapping))
-						self.pgsql_cur.execute(sql_alter_schema)
+						sub_schemas = ["clear", "obfuscate"]
+						for sub_schema in sub_schemas:
+							old_map = old_mapping[sub_schema]
+							new_map = new_mapping[sub_schema]
+							self.logger.debug("Updating mapping for schema %s. Old: %s. New: %s" % (schema, old_map, new_map))
+							sql_tables = """
+								UPDATE sch_ninja.t_replica_tables 
+									SET v_schema_name=%s
+								WHERE 	
+										i_id_source=%s
+									AND	v_schema_name=%s
+								;
+							"""
+							self.pgsql_cur.execute(sql_tables, (new_map, self.i_id_source,old_map ))
+							sql_alter_schema = sql.SQL("ALTER SCHEMA {} RENAME TO {};").format(sql.Identifier(old_map), sql.Identifier(new_map))
+							self.pgsql_cur.execute(sql_alter_schema)
 				sql_source="""
 					UPDATE sch_ninja.t_sources
 						SET 
