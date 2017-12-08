@@ -641,8 +641,7 @@ class mysql_source(object):
 		self.connect_db_buffered()
 		self.pg_engine.connect_db()
 		self.schema_mappings = self.pg_engine.get_schema_mappings()
-		if self.obfuscation:
-			self.obfuscate_schemas = [schema for schema in self.obfuscation]
+		self.obfuscate_schemas = [schema for schema in self.schema_mappings]
 			
 		
 	
@@ -1097,10 +1096,13 @@ class mysql_source(object):
 						self.pg_engine.store_obfuscated_table(table,  schema)
 					except:
 						self.logger.error("Could not obfuscate the table  %s.%s " % (destination_schema,  table))
-				for table in clear_tables:
-					self.pg_engine.create_clear_view(schema, table)
 			except KeyError:
-				self.logger.warning("the schema %s doesn't exists" % (schema))
+				self.logger.warning("the schema %s doesn't have obfuscation" % (schema))
+				clear_tables = [table for table in self.schema_tables[schema]]
+			
+			for table in clear_tables:
+				self.pg_engine.create_clear_view(schema, table)
+			
 				
 	def init_replica(self):
 		"""
