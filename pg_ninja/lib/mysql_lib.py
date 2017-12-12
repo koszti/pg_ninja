@@ -575,7 +575,9 @@ class mysql_source(object):
 				try:
 					master_status = self.copy_data(schema, table)
 					table_pkey = self.create_indices(schema, table)
+					self.logger.info("Trying to store the table %s.%s (pkey %s) in the replica schema" %(destination_schema, table, table_pkey ) )
 					self.pg_engine.store_table(destination_schema, table, table_pkey, master_status)
+					
 				except:
 					self.logger.info("Could not copy the table %s. Excluding it from the replica." %(table) )
 				
