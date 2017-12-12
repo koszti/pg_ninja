@@ -636,6 +636,7 @@ class mysql_source(object):
 		self.out_dir = self.source_config["out_dir"]
 		self.copy_mode = self.source_config["copy_mode"]
 		self.pg_engine.lock_timeout = self.source_config["lock_timeout"]
+		self.pg_engine.grant_select_to = self.source_config["grant_select_to"]
 		self.set_copy_max_memory()
 		self.hexify = [] + self.hexify_always
 		self.connect_db_buffered()
@@ -664,12 +665,20 @@ class mysql_source(object):
 		self.create_destination_tables()
 		self.disconnect_db_buffered()
 		try:
+			
+			
 			self.copy_tables()
 			if self.obfuscation:
 				self.init_obfuscation()
+			self.pg_engine.grant_select()
 			self.pg_engine.swap_schemas()
 			self.drop_loading_schemas()
 			self.pg_engine.set_source_status("initialised")
+			self.connect_db_buffered()
+			master_end = self.get_master_coordinates()
+			self.disconnect_db_buffered()
+			self.pg_engine.set_source_highwatermark(master_end, consistent=False)
+			
 		except:
 			self.drop_loading_schemas()
 			self.pg_engine.set_source_status("error")
@@ -706,6 +715,10 @@ class mysql_source(object):
 			self.pg_engine.swap_tables()
 			self.drop_loading_schemas()
 			self.pg_engine.set_source_status("synced")
+			self.connect_db_buffered()
+			master_end = self.get_master_coordinates()
+			self.disconnect_db_buffered()
+			self.pg_engine.set_source_highwatermark(master_end, consistent=False)
 		except:
 			self.drop_loading_schemas()
 			self.pg_engine.set_source_status("error")
@@ -1098,10 +1111,13 @@ class mysql_source(object):
 						self.logger.error("Could not obfuscate the table  %s.%s " % (destination_schema,  table))
 			except KeyError:
 				self.logger.warning("the schema %s doesn't have obfuscation" % (schema))
-				clear_tables = [table for table in self.schema_tables[schema]]
+				try:
+					clear_tables = [table for table in self.schema_tables[schema]]
+					for table in clear_tables:
+						self.pg_engine.create_clear_view(schema, table)
 			
-			for table in clear_tables:
-				self.pg_engine.create_clear_view(schema, table)
+				except KeyError:
+					self.logger.warning("Could not process the tables in clear in schema %s" % (schema))
 			
 				
 	def init_replica(self):

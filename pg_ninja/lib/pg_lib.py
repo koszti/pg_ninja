@@ -645,7 +645,7 @@ class pg_engine(object):
 			
 		if self.pgsql_cur:
 			self.pgsql_cur = None
-	
+		
 			
 	def set_lock_timeout(self):
 		"""

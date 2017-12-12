@@ -39,6 +39,7 @@ sources:
         create_views_in_schema:
             - sch_readonly
         lock_timeout: "120s"
+        grant_select_to:
         my_server_id: 100
         replica_batch_size: 1000
         replay_max_rows: 2000
