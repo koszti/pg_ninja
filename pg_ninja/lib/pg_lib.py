@@ -717,13 +717,13 @@ class pg_engine(object):
 	
 	def grant_select(self):
 		"""
-			The method grants the select permissions on all the tables on the replicated schemas to the database roles
+			The method grants the select permissions on all the tables on the obfuscated schemas to the database roles
 			listed in the source's variable grant_select_to.
 			In the case a role doesn't exist the method emits an error message and skips the missing user.
 		"""
 		if self.grant_select_to:
 			for schema in  self.schema_loading:
-				schema_loading = self.schema_loading[schema]["loading"]
+				schema_loading = self.schema_loading[schema]["loading_obfuscated"]
 				self.logger.info("Granting select on tables in schema %s to the role(s) %s." % (schema_loading,','.join(self.grant_select_to)))
 				for db_role in self.grant_select_to:
 					sql_grant_usage = sql.SQL("GRANT USAGE ON SCHEMA {} TO {};").format(sql.Identifier(schema_loading), sql.Identifier(db_role))
@@ -731,13 +731,12 @@ class pg_engine(object):
 					try:
 						self.pgsql_cur.execute(sql_grant_usage)
 						self.pgsql_cur.execute(sql_alter_default_privs)
-						for table in self.schema_tables[schema]:
-							self.logger.info("Granting select on table %s.%s to the role %s." % (schema_loading, table,db_role))
-							sql_grant_select = sql.SQL("GRANT SELECT ON TABLE {}.{} TO {};").format(sql.Identifier(schema_loading), sql.Identifier(table), sql.Identifier(db_role))
-							try:
-								self.pgsql_cur.execute(sql_grant_select)
-							except psycopg2.Error as er:
-								self.logger.error("SQLCODE: %s SQLERROR: %s" % (er.pgcode, er.pgerror))
+						self.logger.info("Granting select on all tables in schema %s to the role %s." % (schema_loading, db_role))
+						sql_grant_select = sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {};").format(sql.Identifier(schema_loading), sql.Identifier(db_role))
+						try:
+							self.pgsql_cur.execute(sql_grant_select)
+						except psycopg2.Error as er:
+							self.logger.error("SQLCODE: %s SQLERROR: %s" % (er.pgcode, er.pgerror))
 					except psycopg2.Error as e:
 						if e.pgcode == "42704":
 							self.logger.warning("The role %s does not exist" % (db_role, ))
@@ -3169,7 +3168,10 @@ class pg_engine(object):
 			The original catalogue is not altered but just renamed.
 			All the existing data are transferred into the new catalogue loaded  using the create_schema.sql file.
 		"""
-		replay_max_rows = 10000
+		configured_sources = [source for source in self.sources]
+		first_source_config = configured_sources[0]
+		replay_max_rows = self.sources[first_source_config]["replay_max_rows"]
+		
 		self.__v2_schema = "_sch_ninja_version2"
 		self.__current_schema = "sch_ninja"
 		self.__v1_schema = "_sch_ninja_version1"
@@ -3258,7 +3260,7 @@ class pg_engine(object):
 					ON tab.i_id_source=t_old_new.id_source_old
 				WHERE
 						NOT bat.b_processed
-					AND  bat.b_started
+					AND  NOT bat.b_started
 				ORDER BY v_table_name
 			
 					;
@@ -3329,6 +3331,7 @@ class pg_engine(object):
 		source_replay = self.pgsql_cur.fetchall()	
 		if source_replay:
 			for source in source_replay:
+				
 				id_source = source[0]
 				source_name = source[1]
 				replay_rows = source[2]
@@ -3340,13 +3343,12 @@ class pg_engine(object):
 					replay_status = self.pgsql_cur.fetchone()
 					continue_loop = replay_status[0]
 					if continue_loop:
-						self.logger.info("Still replaying rows for source %s" % ( source_name, ) )
+						self.logger.info("Still replaying rows for source %s with %s max rows" % ( source_name, replay_max_rows,  ) )
 		self.logger.info("Checking if the schema mappings are correctly matched")
 		for source in self.sources:
 			schema_mappings = json.dumps(self.sources[source]["schema_mappings"])
 			self.pgsql_cur.execute(sql_mapping, (schema_mappings, ))
 			config_mapping = self.pgsql_cur.fetchone()
-			print(config_mapping)
 			source_mapped = config_mapping[0]
 			list_mapped = config_mapping[1]
 			list_config = config_mapping[2]

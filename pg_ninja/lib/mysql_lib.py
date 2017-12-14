@@ -575,11 +575,10 @@ class mysql_source(object):
 				try:
 					master_status = self.copy_data(schema, table)
 					table_pkey = self.create_indices(schema, table)
-					self.logger.info("Trying to store the table %s.%s (pkey %s) in the replica schema" %(destination_schema, table, table_pkey ) )
 					self.pg_engine.store_table(destination_schema, table, table_pkey, master_status)
-					
+					self.logger.info("Stored the table %s.%s in the replica schema" %(destination_schema, table, ) )
 				except:
-					self.logger.info("Could not copy the table %s. Excluding it from the replica." %(table) )
+					self.logger.info("An error occurred when copying the table %s.%s. The table will not be replicated." %(destination_schema, table) )
 				
 	
 	def set_copy_max_memory(self):
@@ -711,9 +710,10 @@ class mysql_source(object):
 		self.disconnect_db_buffered()
 		self.copy_tables()
 		if self.obfuscation:
-				self.init_obfuscation()
-				self.pg_engine.obfuscation = self.obfuscation
+			self.init_obfuscation()
+			self.pg_engine.obfuscation = self.obfuscation
 		try:
+			self.pg_engine.grant_select()
 			self.pg_engine.swap_tables()
 			self.drop_loading_schemas()
 			self.pg_engine.set_source_status("synced")
@@ -1143,6 +1143,7 @@ class mysql_source(object):
 			self.copy_tables()
 			if self.obfuscation:
 				self.init_obfuscation()
+			self.pg_engine.grant_select()
 			self.pg_engine.swap_schemas()
 			self.pg_engine.clean_batch_data()
 			self.pg_engine.save_master_status(master_start)
