@@ -254,6 +254,7 @@ class replica_engine(object):
 		else:
 			self.stop_replica()
 			self.load_obfuscation()
+			self.mysql_source.obfuscation = self.obfuscation
 			if self.args.debug:
 				self.mysql_source.refresh_mysql_obfuscation()
 			else:

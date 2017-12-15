@@ -715,33 +715,43 @@ class pg_engine(object):
 			inc_dic[dic_key] = tab_dic
 		return inc_dic
 	
+	def __grant_select(self, role_list, schema_loading):
+		"""
+		"""
+		for db_role in role_list:
+			sql_grant_usage = sql.SQL("GRANT USAGE ON SCHEMA {} TO {};").format(sql.Identifier(schema_loading), sql.Identifier(db_role))
+			sql_alter_default_privs = sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT SELECT ON TABLES TO {};").format(sql.Identifier(schema_loading), sql.Identifier(db_role))
+			try:
+				self.pgsql_cur.execute(sql_grant_usage)
+				self.pgsql_cur.execute(sql_alter_default_privs)
+				self.logger.info("Granting select on all tables in schema %s to the role %s." % (schema_loading, db_role))
+				sql_grant_select = sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {};").format(sql.Identifier(schema_loading), sql.Identifier(db_role))
+				try:
+					self.pgsql_cur.execute(sql_grant_select)
+				except psycopg2.Error as er:
+					self.logger.error("SQLCODE: %s SQLERROR: %s" % (er.pgcode, er.pgerror))
+			except psycopg2.Error as e:
+				if e.pgcode == "42704":
+					self.logger.warning("The role %s does not exist" % (db_role, ))
+				else:
+					self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
+	
 	def grant_select(self):
 		"""
 			The method grants the select permissions on all the tables on the obfuscated schemas to the database roles
 			listed in the source's variable grant_select_to.
 			In the case a role doesn't exist the method emits an error message and skips the missing user.
 		"""
-		if self.grant_select_to:
+		if self.grant_select_to["obfuscated"] or self.grant_select_to["clear"]:
 			for schema in  self.schema_loading:
-				schema_loading = self.schema_loading[schema]["loading_obfuscated"]
-				self.logger.info("Granting select on tables in schema %s to the role(s) %s." % (schema_loading,','.join(self.grant_select_to)))
-				for db_role in self.grant_select_to:
-					sql_grant_usage = sql.SQL("GRANT USAGE ON SCHEMA {} TO {};").format(sql.Identifier(schema_loading), sql.Identifier(db_role))
-					sql_alter_default_privs = sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT SELECT ON TABLES TO {};").format(sql.Identifier(schema_loading), sql.Identifier(db_role))
-					try:
-						self.pgsql_cur.execute(sql_grant_usage)
-						self.pgsql_cur.execute(sql_alter_default_privs)
-						self.logger.info("Granting select on all tables in schema %s to the role %s." % (schema_loading, db_role))
-						sql_grant_select = sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {};").format(sql.Identifier(schema_loading), sql.Identifier(db_role))
-						try:
-							self.pgsql_cur.execute(sql_grant_select)
-						except psycopg2.Error as er:
-							self.logger.error("SQLCODE: %s SQLERROR: %s" % (er.pgcode, er.pgerror))
-					except psycopg2.Error as e:
-						if e.pgcode == "42704":
-							self.logger.warning("The role %s does not exist" % (db_role, ))
-						else:
-							self.logger.error("SQLCODE: %s SQLERROR: %s" % (e.pgcode, e.pgerror))
+				schema_loading_obf = self.schema_loading[schema]["loading_obfuscated"]
+				schema_loading_clear = self.schema_loading[schema]["loading"]
+				role_obf = self.grant_select_to["obfuscated"] 
+				role_clear = self.grant_select_to["clear"]
+				self.logger.info("Granting select on tables in schema %s to the role(s) %s." % (schema_loading_obf,','.join(role_obf)))
+				self.__grant_select(role_obf, schema_loading_obf)
+				self.logger.info("Granting select on tables in schema %s to the role(s) %s." % (schema_loading_clear,','.join(role_clear)))
+				self.__grant_select(role_clear, schema_loading_clear)
 
 	def replay_replica(self):
 		"""

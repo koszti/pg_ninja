@@ -1115,13 +1115,39 @@ class mysql_source(object):
 				self.logger.warning("the schema %s doesn't have obfuscation" % (schema))
 				try:
 					clear_tables = [table for table in self.schema_tables[schema]]
-					for table in clear_tables:
-						self.pg_engine.create_clear_view(schema, table)
-			
 				except KeyError:
 					self.logger.warning("Could not process the tables in clear in schema %s" % (schema))
+				
+			try:
+				
+				for table in clear_tables:
+					self.pg_engine.create_clear_view(schema, table)
+		
+			except KeyError:
+				self.logger.warning("Could not process the tables in clear in schema %s" % (schema))
 			
 				
+				
+	def refresh_mysql_obfuscation(self):
+		"""
+			The method refreshes the obfuscation
+		"""
+		self.logger.debug("starting refresh obfuscation for source %s" % self.source)
+		self.init_sync()
+		self.build_table_exceptions()
+		self.get_table_list()
+		self.create_destination_schemas()
+		try:
+			if self.obfuscation:
+				self.init_obfuscation()
+			self.pg_engine.grant_select()
+			
+		except:
+			self.drop_loading_schemas()
+			self.pg_engine.set_source_status("error")
+			raise
+		
+		self.drop_loading_schemas()
 	def init_replica(self):
 		"""
 			The method performs a full init replica for the given sources
