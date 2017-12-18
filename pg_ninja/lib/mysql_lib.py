@@ -644,8 +644,6 @@ class mysql_source(object):
 		self.pg_engine.connect_db()
 		self.schema_mappings = self.pg_engine.get_schema_mappings()
 		self.obfuscate_schemas = [schema for schema in self.schema_mappings]
-			
-		
 	
 	def refresh_schema(self):
 		"""
@@ -670,7 +668,7 @@ class mysql_source(object):
 			
 			self.copy_tables()
 			if self.obfuscation:
-				self.init_obfuscation()
+				self.__refresh_obfuscation()
 			self.pg_engine.grant_select()
 			self.pg_engine.swap_schemas()
 			self.drop_loading_schemas()
@@ -710,7 +708,7 @@ class mysql_source(object):
 		self.disconnect_db_buffered()
 		self.copy_tables()
 		if self.obfuscation:
-			self.init_obfuscation()
+			self.__refresh_obfuscation()
 			self.pg_engine.obfuscation = self.obfuscation
 		try:
 			self.pg_engine.grant_select()
@@ -1089,7 +1087,27 @@ class mysql_source(object):
 					self.id_batch=None
 		self.pg_engine.check_source_consistent()
 		self.disconnect_db_buffered()
-		
+
+	def __refresh_obfuscation(self):
+		"""
+			The method refreshes the obfuscation into the obfuscated loading schema. 
+			No swap is performed in this method though.
+		"""
+		for schema in self.schema_tables:
+			tables = self.schema_tables[schema]
+			for table in tables:
+				destination_schema = self.schema_loading[schema]["loading_obfuscated"]
+				try:
+					table_obfuscation = self.obfuscation[schema][table]
+					self.logger.info("Creating the table %s.%s " % (destination_schema, table, ))
+					self.pg_engine.create_obfuscated_table(table,  schema)
+					self.pg_engine.copy_obfuscated_table(table,  schema, table_obfuscation)
+					self.pg_engine.create_obfuscated_indices(table,  schema)
+					self.pg_engine.store_obfuscated_table(table,  schema)
+				except KeyError:
+					self.logger.info("The table %s.%s will be exposed as a view" % (destination_schema, table, ))
+					self.pg_engine.create_clear_view(schema, table)
+			
 	def init_obfuscation(self):
 		"""
 			The method initialises the obfuscation into the obfuscated loading schema. 
@@ -1126,7 +1144,8 @@ class mysql_source(object):
 			except KeyError:
 				self.logger.warning("Could not process the tables in clear in schema %s" % (schema))
 			
-				
+
+		
 				
 	def refresh_mysql_obfuscation(self):
 		"""
@@ -1139,7 +1158,8 @@ class mysql_source(object):
 		self.create_destination_schemas()
 		try:
 			if self.obfuscation:
-				self.init_obfuscation()
+				self.__refresh_obfuscation()
+			self.pg_engine.schema_loading = self.schema_loading
 			self.pg_engine.grant_select()
 			
 		except:

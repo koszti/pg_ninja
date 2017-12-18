@@ -249,8 +249,8 @@ class replica_engine(object):
 	def refresh_obfuscation(self):
 		if self.args.source == "*":
 			print("You must specify a source name with the argument --source")
-		elif self.args.tables != "*":
-			print("You cannot specify a table name when running init_replica.")
+		elif self.args.tables != "*" and self.args.schema != "*":
+			print("You cannot specify both table name and schema name when running refresh_obfuscation.")
 		else:
 			self.stop_replica()
 			self.load_obfuscation()
