@@ -3122,14 +3122,13 @@ class pg_engine(object):
 			schema_loading_obfuscated = self.schema_loading[schema]["loading_obfuscated"]
 			schema_obfuscated = self.schema_loading[schema]["obfuscated"]
 			try:
-				obfuscated_tables = [table for table in self.obfuscation[schema]]
+				obfuscated_tables = [table for table in self.obfuscation[schema] if table in self.schema_tables[schema]]
 				clear_tables = [table for table in self.schema_tables[schema] if table not in self.obfuscation[schema]]
 			except:
 				obfuscated_tables = []
 				clear_tables = [table for table in self.schema_tables[schema] ]
-			
 			for table in self.schema_tables[schema]:
-				self.logger.info("Swapping table %s.%s with %s.%s" % (schema_destination, table, schema_loading, table))
+				self.logger.info("Swapping table in clear schema: %s.%s -> %s.%s" % (schema_loading, table, schema_destination, table))
 				sql_drop_origin = sql.SQL("DROP TABLE IF EXISTS {}.{} CASCADE;").format(sql.Identifier(schema_destination),sql.Identifier(table))
 				sql_set_schema_new = sql.SQL("ALTER TABLE {}.{} SET SCHEMA {};").format(sql.Identifier(schema_loading),sql.Identifier(table), sql.Identifier(schema_destination))
 				self.logger.debug("Dropping the original table %s.%s " % (schema_destination, table))
@@ -3139,25 +3138,31 @@ class pg_engine(object):
 				self.pgsql_conn.commit()
 			self.set_autocommit_db(True)	
 			for table in self.schema_tables[schema]:
-				self.logger.info("Swapping obfuscated relation %s.%s with %s.%s" % (schema_obfuscated, table, schema_loading_obfuscated, table))
+				self.logger.info("Dropping the obfuscated relation %s.%s" % (schema_obfuscated, table))
 				sql_drop_view = sql.SQL("DROP VIEW IF EXISTS {}.{} CASCADE;").format(sql.Identifier(schema_obfuscated),sql.Identifier(table))
 				sql_drop_table = sql.SQL("DROP TABLE IF EXISTS {}.{} CASCADE;").format(sql.Identifier(schema_obfuscated),sql.Identifier(table))
 				try:
 					self.pgsql_cur.execute(sql_drop_view)
+					self.logger.info("Dropped the view %s.%s" % (schema_obfuscated, table))
 				except:
 					self.pgsql_cur.execute(sql_drop_table)
+					self.logger.info("Dropped the table %s.%s" % (schema_obfuscated, table))
 			for table in obfuscated_tables:
+				self.logger.info("Swapping relation in obfuscated schema: %s.%s -> %s.%s" % (schema_loading_obfuscated, table, schema_obfuscated, table))
 				sql_set_schema_table = sql.SQL("ALTER TABLE {}.{} SET SCHEMA {};").format(sql.Identifier(schema_loading_obfuscated),sql.Identifier(table), sql.Identifier(schema_obfuscated))
+				sql_set_schema_view = sql.SQL("ALTER VIEW {}.{} SET SCHEMA {};").format(sql.Identifier(schema_loading_obfuscated),sql.Identifier(table), sql.Identifier(schema_obfuscated))
 				try:
 					self.pgsql_cur.execute(sql_set_schema_table)
+					self.logger.info("Changed schema for table %s.%s" % (schema_obfuscated, table))
 				except:
-					pass
+					self.pgsql_cur.execute(sql_set_schema_view)
+					self.logger.info("Changed schema for view %s.%s" % (schema_obfuscated, table))
 			for table in clear_tables:
 				sql_set_schema_view = sql.SQL("ALTER VIEW {}.{} SET SCHEMA {};").format(sql.Identifier(schema_loading_obfuscated),sql.Identifier(table), sql.Identifier(schema_obfuscated))
 				try:
 					self.pgsql_cur.execute(sql_set_schema_view)
 				except:
-					pass
+					raise
 				
 		
 	
