@@ -252,11 +252,15 @@ class replica_engine(object):
 		elif self.args.tables != "*" and self.args.schema != "*":
 			print("You cannot specify both table name and schema name when running refresh_obfuscation.")
 		else:
+			if self.args.tables != "*":
+				swap_tables = True
+			else:
+				swap_tables = False
 			self.stop_replica()
 			self.load_obfuscation()
 			self.mysql_source.obfuscation = self.obfuscation
 			if self.args.debug:
-				self.mysql_source.refresh_mysql_obfuscation()
+				self.mysql_source.refresh_mysql_obfuscation(swap_tables)
 			else:
 				if self.config["log_dest"]  == 'stdout':
 					foreground = True
@@ -266,7 +270,7 @@ class replica_engine(object):
 				keep_fds = [self.logger_fds]
 				init_pid = os.path.expanduser('%s/%s.pid' % (self.config["pid_dir"],self.args.source))
 				self.logger.info("Initialising the replica for source %s" % self.args.source)
-				init_daemon = Daemonize(app="refresh_obfuscation", pid=init_pid, action=self.mysql_source.refresh_mysql_obfuscation, foreground=foreground , keep_fds=keep_fds)
+				init_daemon = Daemonize(app="refre=sh_obfuscation", pid=init_pid, action=self.mysql_source.refresh_mysql_obfuscation, foreground=foreground , keep_fds=keep_fds, args=(swap_tables,))
 				init_daemon.start()
 	def init_replica(self):
 		"""

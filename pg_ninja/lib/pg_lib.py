@@ -836,6 +836,76 @@ class pg_engine(object):
 		table_pkey = self.pgsql_cur.fetchone()
 		return table_pkey[0]
 		
+	def get_tables_disabled(self):
+		"""
+			The method returns a CSV list of tables excluded from the replica.
+			The origin's schema is determined from the source's schema mappings jsonb.
+			
+			:return: CSV list of tables excluded from the replica
+			:rtype: text
+			
+		"""
+		
+		
+		sql_get = """
+			WITH t_map AS 
+			(
+				SELECT 
+					i_id_source,
+					(t_mappings).key as sch_source,
+					((t_mappings).value::json)->>'clear' as sch_clear,
+					((t_mappings).value::json)->>'obfuscate' as sch_obf
+				FROM
+				(
+					SELECT 
+						i_id_source,
+						jsonb_each_text(jsb_schema_mappings) as t_mappings
+					FROM 	
+					sch_ninja.t_sources
+				) map
+				WHERE
+					i_id_source=%s
+			),
+			tab_list AS
+			(
+
+					SELECT 
+						sch_source,
+						v_table_name
+					FROM 
+						sch_ninja.t_replica_tables tab 
+						INNER JOIN t_map 
+						ON 
+								tab.i_id_source=t_map.i_id_source
+							AND	tab.v_schema_name=t_map.sch_clear
+					WHERE  
+						NOT b_replica_enabled
+						
+				UNION 
+					SELECT 
+						sch_source,
+						v_table_name
+				
+					FROM 
+						sch_ninja.t_replica_tables tab 
+						INNER JOIN t_map 
+						ON 
+								tab.i_id_source=t_map.i_id_source
+							AND	tab.v_schema_name=t_map.sch_obf
+					WHERE  
+						NOT b_replica_enabled
+			)
+			SELECT 
+				string_agg(format('%%s.%%s',sch_source,v_table_name),',')  
+			FROM 
+				tab_list
+		;
+		"""
+		self.pgsql_cur.execute(sql_get,(self.i_id_source,))
+		tables_disabled = self.pgsql_cur.fetchone()
+		return tables_disabled[0]
+	
+		
 	def __generate_ddl(self, token,  destination_schema):
 		""" 
 			The method builds the DDL using the tokenised SQL stored in token.

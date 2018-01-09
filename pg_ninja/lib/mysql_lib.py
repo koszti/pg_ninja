@@ -695,9 +695,14 @@ class mysql_source(object):
 			The swap happens in a single transaction.
 		"""
 		self.logger.debug("starting sync tables for source %s" % self.source)
-		self.logger.debug("The tables affected are %s" % self.tables)
 		self.init_sync()
 		self.pg_engine.set_source_status("syncing")
+		if self.tables == 'disabled':
+			self.tables = self.pg_engine.get_tables_disabled()
+			if not self.tables:
+				self.logger.info("There are no disabled tables to sync")
+				return
+		self.logger.debug("The tables affected are %s" % self.tables)
 		self.build_table_exceptions()
 		self.schema_list = [schema for schema in self.schema_mappings if schema in self.schema_only]
 		self.get_table_list()
@@ -1147,20 +1152,28 @@ class mysql_source(object):
 
 		
 				
-	def refresh_mysql_obfuscation(self):
+	def refresh_mysql_obfuscation(self, swap_tables):
 		"""
 			The method refreshes the obfuscation
 		"""
 		self.logger.debug("starting refresh obfuscation for source %s" % self.source)
 		self.init_sync()
+		self.pg_engine.set_source_status("syncing")
 		self.build_table_exceptions()
+		self.schema_list = [schema for schema in self.schema_mappings if schema in self.schema_only]
 		self.get_table_list()
 		self.create_destination_schemas()
+		self.pg_engine.schema_loading = self.schema_loading
+		self.pg_engine.schema_tables = self.schema_tables
+		self.create_destination_tables()
+		
 		try:
 			if self.obfuscation:
 				self.__refresh_obfuscation()
-			self.pg_engine.schema_loading = self.schema_loading
 			self.pg_engine.grant_select()
+			if swap_tables:
+				print(self.schema_tables)
+				self.pg_engine.swap_tables()
 			
 		except:
 			self.drop_loading_schemas()
