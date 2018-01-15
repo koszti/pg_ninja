@@ -939,7 +939,7 @@ class pg_engine(object):
 			table_metadata = token["columns"]
 			table_name = token["name"]
 			index_data = token["indices"]
-			table_ddl = self.build_create_table(table_metadata,  table_name,  destination_schema, temporary_schema=False)
+			table_ddl = self.__build_create_table_mysql(table_metadata,  table_name,  destination_schema, temporary_schema=False)
 			table_enum = ''.join(table_ddl["enum"])
 			table_statement = table_ddl["table"] 
 			index_ddl = self.build_create_index( destination_schema, table_name, index_data)
@@ -1247,11 +1247,12 @@ class pg_engine(object):
 			:param query_data: query's metadata (schema,binlog, etc.)
 			:param destination_schema: the postgresql destination schema determined using the schema mappings.
 		"""
-		drop_create_view = None
+		
 		count_table = self.__count_table_schema(token["name"], destination_schema)
 		count_view = self.__count_view_schema(token["name"], obfuscated_schema)
 		if count_table == 1:
 			pg_ddl = self.__generate_ddl(token, destination_schema)
+			self.logger.debug("Translated query: %s " % (pg_ddl,))
 			if count_view == 1:
 				ddl_view =  self.__generate_drop_view(token["name"], destination_schema, obfuscated_schema)
 				pg_ddl = "%s %s %s" % (ddl_view["drop"], pg_ddl, ddl_view["create"])
@@ -1750,10 +1751,27 @@ class pg_engine(object):
 		self.connect_db()
 		schema_mappings = None
 		table_status = None
+		replica_counters = None
 		if self.source == "*":
 			source_filter = ""
 			
 		else:
+			self.set_source_id()
+			sql_counters = """
+				SELECT 
+					sum(i_replayed) as total_replayed, 
+					sum(i_skipped) as total_skipped, 
+					sum(i_ddl) as total_ddl 
+				FROM 
+					sch_ninja.t_replica_batch 
+				WHERE 
+					i_id_source=%s;
+
+			"""
+			self.pgsql_cur.execute(sql_counters, (self.i_id_source, ))
+			replica_counters = self.pgsql_cur.fetchone()
+			
+			
 			source_filter = (self.pgsql_cur.mogrify(""" WHERE  src.t_source=%s """, (self.source, ))).decode()
 			
 			sql_mappings = """
@@ -1880,7 +1898,7 @@ class pg_engine(object):
 		self.pgsql_cur.execute(sql_status)
 		configuration_status = self.pgsql_cur.fetchall()
 		self.disconnect_db()
-		return [configuration_status, schema_mappings, table_status]
+		return [configuration_status, schema_mappings, table_status,replica_counters]
 		
 	def insert_source_timings(self):
 		"""

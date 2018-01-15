@@ -614,6 +614,7 @@ class replica_engine(object):
 		configuration_status = configuration_data[0]
 		schema_mappings = configuration_data[1]
 		table_status = configuration_data[2]
+		replica_counters = configuration_data[3]
 		tab_headers = ['Source id',  'Source name',  'Status', 'Consistent' ,  'Read lag',  'Last read',  'Replay lag' , 'Last replay']
 		tab_body = []
 		for status in configuration_status:
@@ -652,6 +653,14 @@ class replica_engine(object):
 			tables_all= table_status[2]
 			tab_row = ['All tables', tables_all[1]]
 			tab_body.append(tab_row)
+			print(tabulate(tab_body, tablefmt="simple"))
+			if replica_counters:
+				tab_row = ['Replayed rows', replica_counters[0]]
+				tab_body.append(tab_row)
+				tab_row = ['Replayed DDL', replica_counters[2]]
+				tab_body.append(tab_row)
+				tab_row = ['Skipped rows', replica_counters[1]]
+				tab_body.append(tab_row)
 			print(tabulate(tab_body, tablefmt="simple"))
 			if tables_no_replica[2]:
 				print('\n== Tables with replica disabled ==')

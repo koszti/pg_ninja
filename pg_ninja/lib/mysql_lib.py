@@ -174,6 +174,7 @@ class mysql_source(object):
 					table_list = [table for table in table_list if table not in skip_tables]
 			except KeyError:
 				pass
+				
 			
 			self.schema_tables[schema] = table_list
 	
