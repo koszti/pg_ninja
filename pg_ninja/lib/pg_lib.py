@@ -1072,7 +1072,7 @@ class pg_engine(object):
 				enm_dic = {'table':table_name, 'column':column_name, 'type':column_type, 'enum_list': enum_list, 'enum_elements':alter_dic["dimension"]}
 				enm_alter = self.build_enum_ddl(schema, enm_dic)
 				ddl_pre_alter.append(enm_alter["pre_alter"])
-				ddl_post_alter.append(enm_alter["post_alter"])
+				#ddl_post_alter.append(enm_alter["post_alter"])
 				column_type= enm_alter["column_type"]
 				if 	column_type in ["character varying", "character", 'numeric', 'bit', 'float']:
 						column_type=column_type+"("+str(alter_dic["dimension"])+")"
@@ -2001,18 +2001,16 @@ class pg_engine(object):
 		"""
 		self.pgsql_cur.execute(sql_def_val, (regclass, column ))
 		default_value = self.pgsql_cur.fetchone()
-		query_drop_default = ""
-		query_add_default = ""
-
+		query_drop_default = b""
+		query_add_default = b""
 		if default_value:
 			query_drop_default = sql.SQL(" ALTER TABLE {}.{} ALTER COLUMN {} DROP DEFAULT;").format(sql.Identifier(schema), sql.Identifier(table), sql.Identifier(column))
-			query_add_default = sql.SQL(" ALTER TABLE  {}.{} ALTER COLUMN {} SET DEFAULT %s;").format(sql.Identifier(schema), sql.Identifier(table), sql.Identifier(column))
+			query_add_default = sql.SQL(" ALTER TABLE  {}.{} ALTER COLUMN {} SET DEFAULT %s;" % (default_value[0])).format(sql.Identifier(schema), sql.Identifier(table), sql.Identifier(column))
 			
 			query_drop_default = self.pgsql_cur.mogrify(query_drop_default)
-			query_add_default = self.pgsql_cur.mogrify(query_add_default, (default_value[0], ))
+			query_add_default = self.pgsql_cur.mogrify(query_add_default )
 		
 		return {'drop':query_drop_default.decode(), 'create':query_add_default.decode()}
-
 
 
 	def get_data_type(self, column, schema,  table):

@@ -18,9 +18,10 @@ class sql_token(object):
 		"""
 			Class constructor the regular expressions are compiled and the token lists are initialised.
 		"""
-		self.tokenised=[]
-		self.query_list=[]
-		self.pkey_cols=""
+		self.tokenised = []
+		self.query_list = []
+		self.pkey_cols = []
+		self.ukey_cols = []
 		
 		#re for rename items
 		self.m_rename_items = re.compile(r'(?:.*?\.)?(.*)\s*TO\s*(?:.*?\.)?(.*)(?:;)?', re.IGNORECASE)
@@ -55,7 +56,7 @@ class sql_token(object):
 		self.m_alter_index = re.compile(r'(?:(ALTER\s+?TABLE)\s+(`?\b.*?\b`?))\s+((?:ADD|DROP)\s+(?:UNIQUE)?\s*?(?:INDEX).*,?)', re.IGNORECASE)
 		self.m_alter_table = re.compile(r'(?:(ALTER\s+?TABLE)\s+(`?\b.*?\b`?))\s+((?:ADD|DROP|CHANGE|MODIFY)\s+(?:\bCOLUMN\b)?.*,?)', re.IGNORECASE)
 		self.m_alter_list = re.compile(r'((?:\b(?:ADD|DROP|CHANGE|MODIFY)\b\s+(?:\bCOLUMN\b)?))(.*?,)', re.IGNORECASE)
-		self.m_alter_column = re.compile(r'\s*`?(\w*)`?\s*(\w*)\s*(?:\((.*?)\))?', re.IGNORECASE)
+		self.m_alter_column = re.compile(r'\(?\s*`?(\w*)`?\s*(\w*(?:\s*\w*)?)\s*(?:\((.*?)\))?\)?', re.IGNORECASE)
 		self.m_default_value = re.compile(r"(\bDEFAULT\b)\s*('?\w*'?)\s*", re.IGNORECASE)
 		self.m_alter_change = re.compile(r'\s*`?(\w*)`?\s*`?(\w*)`?\s*(\w*)\s*(?:\((.*?)\))?', re.IGNORECASE)
 		self.m_drop_primary = re.compile(r'(?:(?:ALTER\s+?TABLE)\s+(`?\b.*?\b`?)\s+(DROP\s+PRIMARY\s+KEY))', re.IGNORECASE)
@@ -109,8 +110,9 @@ class sql_token(object):
 			nullcons=self.m_nulls.search(col_def)
 			autoinc=self.m_autoinc.search(col_def)
 			pkey_list=self.pkey_cols
+			
 			col_dic["is_nullable"]="YES"
-			if col_dic["column_name"] in pkey_list:
+			if col_dic["column_name"] in pkey_list or col_dic["column_name"] in self.ukey_cols:
 				col_dic["is_nullable"]="NO"
 			elif nullcons:
 				#pkey_list=[cln.strip() for cln in pkey_list]
@@ -157,7 +159,7 @@ class sql_token(object):
 			The method search for primary keys keys and indices defined in the inner_stat.
 			The index name PRIMARY is used to tell pg_engine we are building a primary key.
 			Otherwise the index name is built using the format (uk)idx_tablename[0:20] + counter.
-			If there's a match for a primary key the composing columns are save into pkey_cols.
+			If there's a match for a primary key the composing columns are saved into pkey_cols.
 			
 			The tablename limitation is required as PostgreSQL enforces a strict limit for the identifier name's lenght.
 			
@@ -178,7 +180,7 @@ class sql_token(object):
 		idx_list=[]
 		idx_counter=0
 		inner_stat= "%s," % inner_stat.strip()
-		print(inner_stat)
+		
 
 		pk_match =  self.m_inline_pkeys.match(inner_stat)
 		pkey=self.m_pkeys.findall(inner_stat)
@@ -215,6 +217,7 @@ class sql_token(object):
 				idx_list.append(dict(list(key_dic.items())))
 				key_dic={}
 				idx_counter+=1
+				self.ukey_cols = self.ukey_cols+[column for column in idx_cols if column not in self.ukey_cols]
 		if idx:
 			for cols in idx:
 				key_dic["index_name"]='idx_'+table_name[0:20]+'_'+str(idx_counter)
@@ -270,16 +273,16 @@ class sql_token(object):
 			:rtype: dictionary
 		"""
 		
-		m_inner=self.m_inner.search(sql_create)
-		inner_stat=m_inner.group(1).strip()
-		table_dic={}
+		m_inner = self.m_inner.search(sql_create)
+		inner_stat = m_inner.group(1).strip()
+		table_dic = {}
 		
-		column_list=self.m_pkeys.sub( '', inner_stat)
-		column_list=self.m_keys.sub( '', column_list)
-		column_list=self.m_idx.sub( '', column_list)
-		column_list=self.m_fkeys.sub( '', column_list)
-		table_dic["indices"]=self.build_key_dic(inner_stat, table_name)
-		mpars=self.m_pars.findall(column_list)
+		column_list = self.m_pkeys.sub( '', inner_stat)
+		column_list = self.m_keys.sub( '', column_list)
+		column_list = self.m_idx.sub( '', column_list)
+		column_list = self.m_fkeys.sub( '', column_list)
+		table_dic["indices"] = self.build_key_dic(inner_stat, table_name)
+		mpars  =self.m_pars.findall(column_list)
 		for match in mpars:
 			new_group=str(match[0]).replace(',', '|')
 			column_list=column_list.replace(match[0], new_group)
@@ -346,7 +349,7 @@ class sql_token(object):
 					if alter_column:
 						alter_dic["command"] = command
 						alter_dic["name"] = alter_column.group(1).strip().strip('`')
-						alter_dic["type"] = alter_column.group(2).lower()
+						alter_dic["type"] = alter_column.group(2).lower().strip()
 						try:
 							alter_dic["dimension"]=alter_column.group(3).replace('|', ',').strip()
 						except:
@@ -376,7 +379,7 @@ class sql_token(object):
 					if alter_column:
 						alter_dic["command"] = command
 						alter_dic["name"] = alter_column.group(1).strip().strip('`')
-						alter_dic["type"] = alter_column.group(2).lower()
+						alter_dic["type"] = alter_column.group(2).lower().strip()
 						try:
 							alter_dic["dimension"]=alter_column.group(3).replace('|', ',').strip()
 						except:
@@ -428,9 +431,9 @@ class sql_token(object):
 			TRUNCATE TABLE
 			
 			The match which is successful determines the parsing of the rest of the statement.
-			Each parse builds a dictionary with at least two keys.
-			Name and Command. 
-			Each statement comes with specific keys.
+			Each parse builds a dictionary with at least two keys "name" and "command".
+			
+			Each statement parse comes with specific addictional keys.
 			
 			When the token dictionary is complete is added to the class list tokenised
 			
