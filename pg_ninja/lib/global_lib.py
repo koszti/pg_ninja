@@ -252,11 +252,15 @@ class replica_engine(object):
 		elif self.args.tables != "*" and self.args.schema != "*":
 			print("You cannot specify both table name and schema name when running refresh_obfuscation.")
 		else:
+			if self.args.tables != "*":
+				swap_tables = True
+			else:
+				swap_tables = False
 			self.stop_replica()
 			self.load_obfuscation()
 			self.mysql_source.obfuscation = self.obfuscation
 			if self.args.debug:
-				self.mysql_source.refresh_mysql_obfuscation()
+				self.mysql_source.refresh_mysql_obfuscation(swap_tables)
 			else:
 				if self.config["log_dest"]  == 'stdout':
 					foreground = True
@@ -266,7 +270,7 @@ class replica_engine(object):
 				keep_fds = [self.logger_fds]
 				init_pid = os.path.expanduser('%s/%s.pid' % (self.config["pid_dir"],self.args.source))
 				self.logger.info("Initialising the replica for source %s" % self.args.source)
-				init_daemon = Daemonize(app="refresh_obfuscation", pid=init_pid, action=self.mysql_source.refresh_mysql_obfuscation, foreground=foreground , keep_fds=keep_fds)
+				init_daemon = Daemonize(app="refre=sh_obfuscation", pid=init_pid, action=self.mysql_source.refresh_mysql_obfuscation, foreground=foreground , keep_fds=keep_fds, args=(swap_tables,))
 				init_daemon.start()
 	def init_replica(self):
 		"""
@@ -610,6 +614,7 @@ class replica_engine(object):
 		configuration_status = configuration_data[0]
 		schema_mappings = configuration_data[1]
 		table_status = configuration_data[2]
+		replica_counters = configuration_data[3]
 		tab_headers = ['Source id',  'Source name',  'Status', 'Consistent' ,  'Read lag',  'Last read',  'Replay lag' , 'Last replay']
 		tab_body = []
 		for status in configuration_status:
@@ -648,6 +653,14 @@ class replica_engine(object):
 			tables_all= table_status[2]
 			tab_row = ['All tables', tables_all[1]]
 			tab_body.append(tab_row)
+			print(tabulate(tab_body, tablefmt="simple"))
+			if replica_counters:
+				tab_row = ['Replayed rows', replica_counters[0]]
+				tab_body.append(tab_row)
+				tab_row = ['Replayed DDL', replica_counters[2]]
+				tab_body.append(tab_row)
+				tab_row = ['Skipped rows', replica_counters[1]]
+				tab_body.append(tab_row)
 			print(tabulate(tab_body, tablefmt="simple"))
 			if tables_no_replica[2]:
 				print('\n== Tables with replica disabled ==')

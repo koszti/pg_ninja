@@ -836,6 +836,76 @@ class pg_engine(object):
 		table_pkey = self.pgsql_cur.fetchone()
 		return table_pkey[0]
 		
+	def get_tables_disabled(self):
+		"""
+			The method returns a CSV list of tables excluded from the replica.
+			The origin's schema is determined from the source's schema mappings jsonb.
+			
+			:return: CSV list of tables excluded from the replica
+			:rtype: text
+			
+		"""
+		
+		
+		sql_get = """
+			WITH t_map AS 
+			(
+				SELECT 
+					i_id_source,
+					(t_mappings).key as sch_source,
+					((t_mappings).value::json)->>'clear' as sch_clear,
+					((t_mappings).value::json)->>'obfuscate' as sch_obf
+				FROM
+				(
+					SELECT 
+						i_id_source,
+						jsonb_each_text(jsb_schema_mappings) as t_mappings
+					FROM 	
+					sch_ninja.t_sources
+				) map
+				WHERE
+					i_id_source=%s
+			),
+			tab_list AS
+			(
+
+					SELECT 
+						sch_source,
+						v_table_name
+					FROM 
+						sch_ninja.t_replica_tables tab 
+						INNER JOIN t_map 
+						ON 
+								tab.i_id_source=t_map.i_id_source
+							AND	tab.v_schema_name=t_map.sch_clear
+					WHERE  
+						NOT b_replica_enabled
+						
+				UNION 
+					SELECT 
+						sch_source,
+						v_table_name
+				
+					FROM 
+						sch_ninja.t_replica_tables tab 
+						INNER JOIN t_map 
+						ON 
+								tab.i_id_source=t_map.i_id_source
+							AND	tab.v_schema_name=t_map.sch_obf
+					WHERE  
+						NOT b_replica_enabled
+			)
+			SELECT 
+				string_agg(format('%%s.%%s',sch_source,v_table_name),',')  
+			FROM 
+				tab_list
+		;
+		"""
+		self.pgsql_cur.execute(sql_get,(self.i_id_source,))
+		tables_disabled = self.pgsql_cur.fetchone()
+		return tables_disabled[0]
+	
+		
 	def __generate_ddl(self, token,  destination_schema):
 		""" 
 			The method builds the DDL using the tokenised SQL stored in token.
@@ -853,23 +923,14 @@ class pg_engine(object):
 			:rtype: string
 			
 		"""
+		
+		count_table = self.__count_table_schema(token["name"], destination_schema)
 		query=""
-		if token["command"] =="RENAME TABLE":
-			old_name = token["name"]
-			new_name = token["new_name"]
-			query = """ALTER TABLE "%s"."%s" RENAME TO "%s" """ % (destination_schema, old_name, new_name)	
-			table_pkey = self.get_table_pkey(destination_schema, old_name)
-			if table_pkey:
-				self.store_table(destination_schema, new_name, table_pkey, None)
-		elif token["command"] == "DROP TABLE":
-			query=""" DROP TABLE IF EXISTS "%s"."%s";""" % (destination_schema, token["name"])	
-		elif token["command"] == "TRUNCATE":
-			query=""" TRUNCATE TABLE "%s"."%s" CASCADE;""" % (destination_schema, token["name"])	
-		elif token["command"] =="CREATE TABLE":
+		if token["command"] =="CREATE TABLE":
 			table_metadata = token["columns"]
 			table_name = token["name"]
-			index_data = token["indices"]
-			table_ddl = self.build_create_table(table_metadata,  table_name,  destination_schema, temporary_schema=False)
+			index_data = token["indices"]	
+			table_ddl = self.__build_create_table_mysql(table_metadata,  table_name,  destination_schema, temporary_schema=False)
 			table_enum = ''.join(table_ddl["enum"])
 			table_statement = table_ddl["table"] 
 			index_ddl = self.build_create_index( destination_schema, table_name, index_data)
@@ -877,10 +938,24 @@ class pg_engine(object):
 			table_indices = ''.join([val for key ,val in index_ddl[1].items()])
 			self.store_table(destination_schema, table_name, table_pkey, None)
 			query = "%s %s %s " % (table_enum, table_statement,  table_indices)
-		elif token["command"] == "ALTER TABLE":
-			query=self.build_alter_table(destination_schema, token)
-		elif token["command"] == "DROP PRIMARY KEY":
-			self.drop_primary_key(destination_schema, token)
+		else:
+			if count_table == 1:
+				if token["command"] =="RENAME TABLE":
+					old_name = token["name"]
+					new_name = token["new_name"]
+					query = """ALTER TABLE "%s"."%s" RENAME TO "%s" """ % (destination_schema, old_name, new_name)	
+					table_pkey = self.get_table_pkey(destination_schema, old_name)
+					if table_pkey:
+						self.store_table(destination_schema, new_name, table_pkey, None)
+				elif token["command"] == "DROP TABLE":
+					query=""" DROP TABLE IF EXISTS "%s"."%s";""" % (destination_schema, token["name"])	
+				elif token["command"] == "TRUNCATE":
+					query=""" TRUNCATE TABLE "%s"."%s" CASCADE;""" % (destination_schema, token["name"])	
+				
+				elif token["command"] == "ALTER TABLE":
+					query=self.build_alter_table(destination_schema, token)
+				elif token["command"] == "DROP PRIMARY KEY":
+					self.__drop_primary_key(destination_schema, token)
 		return query 
 
 	def build_enum_ddl(self, schema, enm_dic):
@@ -997,7 +1072,7 @@ class pg_engine(object):
 				enm_dic = {'table':table_name, 'column':column_name, 'type':column_type, 'enum_list': enum_list, 'enum_elements':alter_dic["dimension"]}
 				enm_alter = self.build_enum_ddl(schema, enm_dic)
 				ddl_pre_alter.append(enm_alter["pre_alter"])
-				ddl_post_alter.append(enm_alter["post_alter"])
+				#ddl_post_alter.append(enm_alter["post_alter"])
 				column_type= enm_alter["column_type"]
 				if 	column_type in ["character varying", "character", 'numeric', 'bit', 'float']:
 						column_type=column_type+"("+str(alter_dic["dimension"])+")"
@@ -1177,50 +1252,53 @@ class pg_engine(object):
 			:param query_data: query's metadata (schema,binlog, etc.)
 			:param destination_schema: the postgresql destination schema determined using the schema mappings.
 		"""
-		drop_create_view = None
-		count_table = self.__count_table_schema(token["name"], destination_schema)
-		count_view = self.__count_view_schema(token["name"], obfuscated_schema)
-		if count_table == 1:
-			pg_ddl = self.__generate_ddl(token, destination_schema)
-			if count_view == 1:
-				ddl_view =  self.__generate_drop_view(token["name"], destination_schema, obfuscated_schema)
-				pg_ddl = "%s %s %s" % (ddl_view["drop"], pg_ddl, ddl_view["create"])
 		
-			self.logger.debug("Translated query: %s " % (pg_ddl,))
-			log_table = query_data["log_table"]
-			insert_vals = (	
-					query_data["batch_id"], 
-					token["name"],  
-					query_data["schema"], 
-					query_data["binlog"], 
-					query_data["logpos"], 
-					pg_ddl
+		#count_table = self.__count_table_schema(token["name"], destination_schema)
+		count_view = self.__count_view_schema(token["name"], obfuscated_schema)
+		pg_ddl = self.__generate_ddl(token, destination_schema)
+		if count_view == 1:
+			ddl_view =  self.__generate_drop_view(token["name"], destination_schema, obfuscated_schema)
+			if token["command"] == "DROP TABLE":
+				create_cmd = ""
+			else:
+				create_cmd = ddl_view["create"]
+			pg_ddl = "%s %s %s" % (ddl_view["drop"], pg_ddl, create_cmd)
+	
+		self.logger.debug("Translated query: %s " % (pg_ddl,))
+		log_table = query_data["log_table"]
+		insert_vals = (	
+				query_data["batch_id"], 
+				token["name"],  
+				query_data["schema"], 
+				query_data["binlog"], 
+				query_data["logpos"], 
+				pg_ddl
+			)
+		sql_insert=sql.SQL("""
+			INSERT INTO "sch_ninja".{}
+				(
+					i_id_batch, 
+					v_table_name, 
+					v_schema_name, 
+					enm_binlog_event, 
+					t_binlog_name, 
+					i_binlog_position, 
+					t_query
 				)
-			sql_insert=sql.SQL("""
-				INSERT INTO "sch_ninja".{}
-					(
-						i_id_batch, 
-						v_table_name, 
-						v_schema_name, 
-						enm_binlog_event, 
-						t_binlog_name, 
-						i_binlog_position, 
-						t_query
-					)
-				VALUES
-					(
-						%s,
-						%s,
-						%s,
-						'ddl',
-						%s,
-						%s,
-						%s
-					)
-				;
-			""").format(sql.Identifier(log_table), )
-			
-			self.pgsql_cur.execute(sql_insert, insert_vals)
+			VALUES
+				(
+					%s,
+					%s,
+					%s,
+					'ddl',
+					%s,
+					%s,
+					%s
+				)
+			;
+		""").format(sql.Identifier(log_table), )
+		
+		self.pgsql_cur.execute(sql_insert, insert_vals)
 		
 	def get_batch_data(self):
 		"""
@@ -1680,10 +1758,27 @@ class pg_engine(object):
 		self.connect_db()
 		schema_mappings = None
 		table_status = None
+		replica_counters = None
 		if self.source == "*":
 			source_filter = ""
 			
 		else:
+			self.set_source_id()
+			sql_counters = """
+				SELECT 
+					sum(i_replayed) as total_replayed, 
+					sum(i_skipped) as total_skipped, 
+					sum(i_ddl) as total_ddl 
+				FROM 
+					sch_ninja.t_replica_batch 
+				WHERE 
+					i_id_source=%s;
+
+			"""
+			self.pgsql_cur.execute(sql_counters, (self.i_id_source, ))
+			replica_counters = self.pgsql_cur.fetchone()
+			
+			
 			source_filter = (self.pgsql_cur.mogrify(""" WHERE  src.t_source=%s """, (self.source, ))).decode()
 			
 			sql_mappings = """
@@ -1810,7 +1905,7 @@ class pg_engine(object):
 		self.pgsql_cur.execute(sql_status)
 		configuration_status = self.pgsql_cur.fetchall()
 		self.disconnect_db()
-		return [configuration_status, schema_mappings, table_status]
+		return [configuration_status, schema_mappings, table_status,replica_counters]
 		
 	def insert_source_timings(self):
 		"""
@@ -1906,18 +2001,16 @@ class pg_engine(object):
 		"""
 		self.pgsql_cur.execute(sql_def_val, (regclass, column ))
 		default_value = self.pgsql_cur.fetchone()
-		query_drop_default = ""
-		query_add_default = ""
-
+		query_drop_default = b""
+		query_add_default = b""
 		if default_value:
 			query_drop_default = sql.SQL(" ALTER TABLE {}.{} ALTER COLUMN {} DROP DEFAULT;").format(sql.Identifier(schema), sql.Identifier(table), sql.Identifier(column))
-			query_add_default = sql.SQL(" ALTER TABLE  {}.{} ALTER COLUMN {} SET DEFAULT %s;").format(sql.Identifier(schema), sql.Identifier(table), sql.Identifier(column))
+			query_add_default = sql.SQL(" ALTER TABLE  {}.{} ALTER COLUMN {} SET DEFAULT %s;" % (default_value[0])).format(sql.Identifier(schema), sql.Identifier(table), sql.Identifier(column))
 			
 			query_drop_default = self.pgsql_cur.mogrify(query_drop_default)
-			query_add_default = self.pgsql_cur.mogrify(query_add_default, (default_value[0], ))
+			query_add_default = self.pgsql_cur.mogrify(query_add_default )
 		
 		return {'drop':query_drop_default.decode(), 'create':query_add_default.decode()}
-
 
 
 	def get_data_type(self, column, schema,  table):
