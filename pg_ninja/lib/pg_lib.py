@@ -753,6 +753,27 @@ class pg_engine(object):
 				self.logger.info("Granting select on tables in schema %s to the role(s) %s." % (schema_loading_clear,','.join(role_clear)))
 				self.__grant_select(role_clear, schema_loading_clear)
 
+
+	def __cleanup_replayed_batches(self):
+		"""
+			The method cleanup the replayed batches for the given source accordingly with the source's parameter  batch_retention
+		"""
+		batch_retention = self.source_config["batch_retention"]
+		self.logger.info("Cleaning replayed batches for source %s older than %s" % (self.source,batch_retention) )
+		sql_cleanup = """
+			DELETE FROM 
+				sch_ninja.t_replica_batch
+			WHERE
+					b_started
+				AND b_processed
+				AND b_replayed
+				AND now()-ts_replayed>%s::interval
+				AND i_id_source=%s
+			;
+		"""
+		self.pgsql_cur.execute(sql_cleanup, (batch_retention, self.i_id_source ))
+
+
 	def replay_replica(self):
 		"""
 			The method replays the row images in the target database using the function 
@@ -786,7 +807,7 @@ class pg_engine(object):
 				raise Exception('The replay process crashed')
 			if replay_status[2]:
 				tables_error.append(replay_status[2])
-				
+		self. __cleanup_replayed_batches()		
 		return tables_error
 			
 	
