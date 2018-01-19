@@ -513,34 +513,49 @@ class replica_engine(object):
 				break
 			time.sleep(check_timeout)
 		self.logger.info("Replica process for source %s ended" % (self.args.source))	
+
 	def start_replica(self):
 		"""
 			The method starts a new replica process.
 			Is compulsory to specify a source name when running this method.
 		"""
+		
 		replica_pid = os.path.expanduser('%s/%s.pid' % (self.config["pid_dir"],self.args.source))
 				
 		if self.args.source == "*":
 			print("You must specify a source name using the argument --source")
 		else:
-			if self.args.debug:
-				self.run_replica()
-			else:
-				if self.config["log_dest"]  == 'stdout':
-					foreground = True
-				else:
-					self.logger = self.__init_logger()
-					foreground = False
-					print("Starting the replica process for source %s" % (self.args.source))
-					keep_fds = [self.logger_fds]
-					
-					app_name = "%s_replica" % self.args.source
-					replica_daemon = Daemonize(app=app_name, pid=replica_pid, action=self.run_replica, foreground=foreground , keep_fds=keep_fds)
-					try:
-						replica_daemon.start()
-					except:
-						print("The replica process is already started. Aborting the command.")
+			self.pg_engine.connect_db()
+			self.logger.info("Checking if the replica for source %s is stopped " % (self.args.source))
+			replica_status = self.pg_engine.get_replica_status()
+			if replica_status in ['syncing', 'running', 'initialising']:
+				print("The replica process is already started or is syncing. Aborting the command.")
+			elif replica_status == 'error':
+				print("The replica process is in error state.")
+				print("You may need to check the replica status first. To enable it run the following command.")
+				print("pgninja.py enable_replica --config %s --source %s " % (self.args.config, self.args.source))
 				
+			else:
+				self.logger.info("Cleaning not processed batches for source %s" % (self.args.source))
+				self.pg_engine.clean_not_processed_batches()
+				self.pg_engine.disconnect_db()
+				if self.args.debug:
+					self.run_replica()
+				else:
+					if self.config["log_dest"]  == 'stdout':
+						foreground = True
+					else:
+						self.logger = self.__init_logger()
+						foreground = False
+						print("Starting the replica process for source %s" % (self.args.source))
+						keep_fds = [self.logger_fds]
+						
+						app_name = "%s_replica" % self.args.source
+						replica_daemon = Daemonize(app=app_name, pid=replica_pid, action=self.run_replica, foreground=foreground , keep_fds=keep_fds)
+						try:
+							replica_daemon.start()
+						except:
+							print("The replica process is already started. Aborting the command.")				
 	
 	def stop_replica(self):
 		"""
@@ -566,6 +581,13 @@ class replica_engine(object):
 		else:
 			print("Couldn't complete the command. The pid file is not present in %s." % replica_pid)
 		
+	def enable_replica(self):
+		"""
+			The method  resets the source status to stopped
+		"""
+		self.pg_engine.connect_db()
+		self.pg_engine.set_source_status("stopped")
+	
 	def show_errors(self):
 		"""
 			displays the error log entries if any.
