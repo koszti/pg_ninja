@@ -1125,7 +1125,9 @@ class mysql_source(object):
 				except KeyError:
 					self.logger.info("The table %s.%s will be exposed as a view" % (destination_schema, table, ))
 					self.pg_engine.create_clear_view(schema, table)
-			
+	
+	
+	
 	def init_obfuscation(self):
 		"""
 			The method initialises the obfuscation into the obfuscated loading schema. 
