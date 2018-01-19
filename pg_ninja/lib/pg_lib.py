@@ -540,9 +540,16 @@ class pgsql_source(object):
 			self.pg_engine.swap_schemas()
 			self.__drop_loading_schemas()
 			self.pg_engine.set_source_status("initialised")
+			notifier_message = "init replica for source %s is complete" % self.source
+			self.notifier.send_message(notifier_message, 'info')
+			self.logger.info(notifier_message)
 		except:
 			self.__drop_loading_schemas()
 			self.pg_engine.set_source_status("error")
+			notifier_message = "init replica for source %s failed" % self.source
+			self.notifier.send_message(notifier_message, 'critical')
+			self.logger.critical(notifier_message)
+			
 			raise
 		
 
