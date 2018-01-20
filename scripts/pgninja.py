@@ -31,6 +31,7 @@ tables_help = """Specifies the tables within a source . If omitted all tables ar
 debug_help = """Forces the debug mode with logging on stdout and log level debug."""
 logid_help = """Specifies the log id entry for displaying the error details"""
 version_help = """Displays pg_ninja's installed  version."""
+rollbar_help = """Overrides the level for messages to be sent to rolllbar. One of: "critical", "error", "warning", "info". The Default is "info" """
 
 parser = argparse.ArgumentParser(description='Command line for pg_ninja.',  add_help=True)
 parser.add_argument('command', type=str, help=command_help)
@@ -41,6 +42,7 @@ parser.add_argument('--tables', type=str,  default='*',  required=False, help=ta
 parser.add_argument('--logid', type=str,  default='*',  required=False, help=logid_help)
 parser.add_argument('--debug', default=False, required=False, help=debug_help, action='store_true')
 parser.add_argument('--version', action='version', help=version_help,version='pg_ninja {version}'.format(version=__version__))
+parser.add_argument('--rollbar-level', type=str, default="info", required=False, help=rollbar_help)
 
 args = parser.parse_args()
 

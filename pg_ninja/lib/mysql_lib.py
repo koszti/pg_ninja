@@ -678,10 +678,16 @@ class mysql_source(object):
 			master_end = self.get_master_coordinates()
 			self.disconnect_db_buffered()
 			self.pg_engine.set_source_highwatermark(master_end, consistent=False)
+			notifier_message = "refresh schema %s for source %s is complete" % (self.schema, self.source)
+			self.notifier.send_message(notifier_message, 'info')
+			self.logger.info(notifier_message)
 			
 		except:
 			self.drop_loading_schemas()
 			self.pg_engine.set_source_status("error")
+			notifier_message = "refresh schema %s for source %s failed" % (self.schema, self.source)
+			self.notifier.send_message(notifier_message, 'critical')
+			self.logger.critical(notifier_message)
 			raise
 	
 	
@@ -725,9 +731,15 @@ class mysql_source(object):
 			master_end = self.get_master_coordinates()
 			self.disconnect_db_buffered()
 			self.pg_engine.set_source_highwatermark(master_end, consistent=False)
+			notifier_message = "the sync for tables %s in source %s is complete" % (self.tables, self.source)
+			self.notifier.send_message(notifier_message, 'info')
+			self.logger.info(notifier_message)
 		except:
 			self.drop_loading_schemas()
 			self.pg_engine.set_source_status("error")
+			notifier_message = "the sync for tables %s in source %s failed" % (self.tables, self.source)
+			self.notifier.send_message(notifier_message, 'critical')
+			self.logger.critical(notifier_message)
 			raise
 		
 	def get_table_type_map(self):
@@ -1113,7 +1125,9 @@ class mysql_source(object):
 				except KeyError:
 					self.logger.info("The table %s.%s will be exposed as a view" % (destination_schema, table, ))
 					self.pg_engine.create_clear_view(schema, table)
-			
+	
+	
+	
 	def init_obfuscation(self):
 		"""
 			The method initialises the obfuscation into the obfuscated loading schema. 
@@ -1213,9 +1227,15 @@ class mysql_source(object):
 			master_end = self.get_master_coordinates()
 			self.disconnect_db_buffered()
 			self.pg_engine.set_source_highwatermark(master_end, consistent=False)
+			notifier_message = "init replica for source %s is complete" % self.source
+			self.notifier.send_message(notifier_message, 'info')
+			self.logger.info(notifier_message)
 		except:
 			self.drop_loading_schemas()
 			self.pg_engine.set_source_status("error")
+			notifier_message = "init replica for source %s failed" % self.source
+			self.logger.critical(notifier_message)
+			self.notifier.send_message(notifier_message, 'critical')
 			raise
 		
 		

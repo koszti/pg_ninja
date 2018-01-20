@@ -540,9 +540,16 @@ class pgsql_source(object):
 			self.pg_engine.swap_schemas()
 			self.__drop_loading_schemas()
 			self.pg_engine.set_source_status("initialised")
+			notifier_message = "init replica for source %s is complete" % self.source
+			self.notifier.send_message(notifier_message, 'info')
+			self.logger.info(notifier_message)
 		except:
 			self.__drop_loading_schemas()
 			self.pg_engine.set_source_status("error")
+			notifier_message = "init replica for source %s failed" % self.source
+			self.notifier.send_message(notifier_message, 'critical')
+			self.logger.critical(notifier_message)
+			
 			raise
 		
 
@@ -2787,6 +2794,48 @@ class pg_engine(object):
 		"""
 		self.pgsql_cur.execute(sql_cleanup, (self.i_id_source, ))
 
+	def get_replica_status(self):
+		"""
+			The method gets the replica status for the given source. 
+			The method assumes there is a database connection active.
+		"""
+		self.set_source_id()
+		sql_status = """
+			SELECT 
+				enm_status
+			FROM
+				sch_ninja.t_sources
+			WHERE
+				i_id_source=%s
+			;
+		"""
+		self.pgsql_cur.execute(sql_status, (self.i_id_source, ))
+		replica_status = self.pgsql_cur.fetchone()
+		return replica_status[0]
+
+	def clean_not_processed_batches(self):
+		"""
+			The method cleans up the not processed batches rows from the table sch_ninja.t_log_replica.
+			The method should be executed only before starting a replica process.
+			The method assumes there is a database connection active.
+		"""
+		self.set_source_id()
+		sql_cleanup = """
+			DELETE FROM sch_ninja.t_log_replica 
+			WHERE 
+				i_id_batch IN (
+					SELECT 
+						i_id_batch 
+					FROM 
+						sch_ninja.t_replica_batch 
+					WHERE 
+							i_id_source=%s 
+						AND	NOT b_processed
+					)
+			;
+		"""
+		self.pgsql_cur.execute(sql_cleanup, (self.i_id_source, ))
+	
 
 	def check_source_consistent(self):
 		"""
@@ -3225,6 +3274,40 @@ class pg_engine(object):
 		"""
 		self.pgsql_cur.execute(sql_collect_events, (id_batch, ))
 	
+	def __swap_enums(self):
+		"""
+			The method searches for enumerations in the loading schemas and swaps them with the types eventually
+			present in the destination schemas
+		"""
+		sql_get_enum = """
+			SELECT 
+				typname 
+			FROM 
+				pg_type typ 
+				INNER JOIN pg_namespace sch 
+				ON 
+					typ.typnamespace=sch.oid 
+			WHERE
+					sch.nspname=%s
+				and	typcategory='E'
+			;
+		"""
+		
+		for schema in self.schema_tables:
+			schema_loading = self.schema_loading[schema]["loading"]
+			schema_destination = self.schema_loading[schema]["destination"]
+			self.pgsql_cur.execute(sql_get_enum, (schema_loading,))
+			enum_list = self.pgsql_cur.fetchall()
+			for enumeration in enum_list:
+				type_name = enumeration[0]
+				sql_drop_origin = sql.SQL("DROP TYPE IF EXISTS {}.{} CASCADE;").format(sql.Identifier(schema_destination),sql.Identifier(type_name))
+				sql_set_schema_new = sql.SQL("ALTER TYPE {}.{} SET SCHEMA {};").format(sql.Identifier(schema_loading),sql.Identifier(type_name), sql.Identifier(schema_destination))
+				self.logger.debug("Dropping the original tpye %s.%s " % (schema_destination, type_name))
+				self.pgsql_cur.execute(sql_drop_origin)
+				self.logger.debug("Changing the schema for type %s.%s to %s" % (schema_loading, type_name, schema_destination))
+				self.pgsql_cur.execute(sql_set_schema_new)
+			
+	
 	def swap_tables(self):
 		"""
 			The method loops over the tables stored in the class 
@@ -3277,7 +3360,7 @@ class pg_engine(object):
 					self.pgsql_cur.execute(sql_set_schema_view)
 				except:
 					raise
-				
+			self.__swap_enums()
 		
 	
 	def create_database_schema(self, schema_name):

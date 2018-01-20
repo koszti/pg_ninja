@@ -15,6 +15,49 @@ from daemonize import Daemonize
 import multiprocessing as mp
 import traceback 
 
+
+class rollbar_notifier(object):
+	"""
+		This class is used to send messages to rollbar whether the key and environment variables are set
+	"""
+	def __init__(self, rollbar_key, rollbar_env, rollbar_level, logger):
+		"""
+			Class constructor.
+		"""
+		self.levels = {
+				"critical": 1, 
+				"error": 2, 
+				"warning": 3, 
+				"info": 5
+			}
+		self.rollbar_level = self.levels[rollbar_level]
+		self.logger = logger
+		self.notifier = rollbar
+		if rollbar_key !='' and rollbar_env != '':
+			self.notifier.init(rollbar_key, rollbar_env)  
+		else:
+			self.notifier = None
+		
+		
+	def send_message(self, message, level):
+		"""
+			The method sends a message to rollbar. If it fails it just logs an error 
+			without causing the process to crash.
+		"""
+		exc_info = sys.exc_info()
+		try:
+			notification_level = self.levels[level]
+			if notification_level <= self.rollbar_level:
+				try:
+					self.notifier.report_message(message, level)
+					if exc_info[0]:
+						self.notifier.report_exc_info(exc_info)
+				except:
+					self.logger.error("Could not send the message to rollbar.")
+		except:
+			self.logger.error("Wrong rollbar level specified.")
+
+
 class replica_engine(object):
 	"""
 		This class is wraps the the mysql and postgresql engines in order to perform the various activities required for the replica. 
@@ -52,11 +95,15 @@ class replica_engine(object):
 		self.args = args
 		self.load_config()
 		self.obfuscation = None
+		self.logger = self.__init_logger()
+		
+		#notifier configuration
+		self.notifier = rollbar_notifier(self.config["rollbar_key"],self.config["rollbar_env"] , self.args.rollbar_level ,  self.logger )
+		
 		
 		#pg_engine instance initialisation
 		self.pg_engine = pg_engine()
 		self.pg_engine.dest_conn = self.config["pg_conn"]
-		self.logger = self.__init_logger()
 		self.pg_engine.logger = self.logger
 		self.pg_engine.source = self.args.source
 		self.pg_engine.type_override = self.config["type_override"]
@@ -73,6 +120,7 @@ class replica_engine(object):
 		self.mysql_source.sources = self.config["sources"]
 		self.mysql_source.type_override = self.config["type_override"]
 		catalog_version = self.pg_engine.get_catalog_version()
+		self.mysql_source.notifier = self.notifier
 
 		#pgsql_source instance initialisation
 		self.pgsql_source = pgsql_source()
@@ -84,6 +132,7 @@ class replica_engine(object):
 		self.pgsql_source.sources = self.config["sources"]
 		self.pgsql_source.type_override = self.config["type_override"]
 		catalog_version = self.pg_engine.get_catalog_version()
+		self.pgsql_source.notifier = self.notifier
 
 		#safety checks
 		if self.args.command == 'upgrade_replica_schema':
@@ -457,14 +506,13 @@ class replica_engine(object):
 		while True:
 			try:
 				tables_error = self.pg_engine.replay_replica()
+						
 				if len(tables_error) > 0:
 					table_list = [item for sublist in tables_error for item in sublist]
 					tables_removed = "\n".join(table_list)
-					error_msg = "There was an error during the replay of data. %s. The affected tables are no longer replicated." % (tables_removed)
-					self.logger.error(error_msg)
-					if self.config["rollbar_key"] !='' and self.config["rollbar_env"] != '':
-						rollbar.init(self.config["rollbar_key"], self.config["rollbar_env"])  
-						rollbar.report_message(error_msg, 'error')
+					notifier_message = "There was an error during the replay of data. %s. The affected tables are no longer replicated." % (tables_removed)
+					self.logger.error(notifier_message)
+					self.notifier.send_message(notifier_message, 'error')
 				time.sleep(self.sleep_loop)
 			except Exception:
 			    queue.put(traceback.format_exc())
@@ -506,41 +554,55 @@ class replica_engine(object):
 					self.pg_engine.set_source_status("error")
 				except:
 					pass
-				if self.config["rollbar_key"] !='' and self.config["rollbar_env"] != '':
-					rollbar.init(self.config["rollbar_key"], self.config["rollbar_env"])  
-					rollbar.report_message("The replica process crashed.\n Source: %s\n Stack trace: %s " %(self.args.source, stack_trace), 'error')
+				notifier_message = "The replica process crashed.\n Source: %s\n Stack trace: %s " %(self.args.source, stack_trace)
+				self.notifier.send_message(notifier_message, 'critical')
 					
 				break
 			time.sleep(check_timeout)
 		self.logger.info("Replica process for source %s ended" % (self.args.source))	
+
 	def start_replica(self):
 		"""
 			The method starts a new replica process.
 			Is compulsory to specify a source name when running this method.
 		"""
+		
 		replica_pid = os.path.expanduser('%s/%s.pid' % (self.config["pid_dir"],self.args.source))
 				
 		if self.args.source == "*":
 			print("You must specify a source name using the argument --source")
 		else:
-			if self.args.debug:
-				self.run_replica()
-			else:
-				if self.config["log_dest"]  == 'stdout':
-					foreground = True
-				else:
-					self.logger = self.__init_logger()
-					foreground = False
-					print("Starting the replica process for source %s" % (self.args.source))
-					keep_fds = [self.logger_fds]
-					
-					app_name = "%s_replica" % self.args.source
-					replica_daemon = Daemonize(app=app_name, pid=replica_pid, action=self.run_replica, foreground=foreground , keep_fds=keep_fds)
-					try:
-						replica_daemon.start()
-					except:
-						print("The replica process is already started. Aborting the command.")
+			self.pg_engine.connect_db()
+			self.logger.info("Checking if the replica for source %s is stopped " % (self.args.source))
+			replica_status = self.pg_engine.get_replica_status()
+			if replica_status in ['syncing', 'running', 'initialising']:
+				print("The replica process is already started or is syncing. Aborting the command.")
+			elif replica_status == 'error':
+				print("The replica process is in error state.")
+				print("You may need to check the replica status first. To enable it run the following command.")
+				print("pgninja.py enable_replica --config %s --source %s " % (self.args.config, self.args.source))
 				
+			else:
+				self.logger.info("Cleaning not processed batches for source %s" % (self.args.source))
+				self.pg_engine.clean_not_processed_batches()
+				self.pg_engine.disconnect_db()
+				if self.args.debug:
+					self.run_replica()
+				else:
+					if self.config["log_dest"]  == 'stdout':
+						foreground = True
+					else:
+						self.logger = self.__init_logger()
+						foreground = False
+						print("Starting the replica process for source %s" % (self.args.source))
+						keep_fds = [self.logger_fds]
+						
+						app_name = "%s_replica" % self.args.source
+						replica_daemon = Daemonize(app=app_name, pid=replica_pid, action=self.run_replica, foreground=foreground , keep_fds=keep_fds)
+						try:
+							replica_daemon.start()
+						except:
+							print("The replica process is already started. Aborting the command.")				
 	
 	def stop_replica(self):
 		"""
@@ -566,6 +628,13 @@ class replica_engine(object):
 		else:
 			print("Couldn't complete the command. The pid file is not present in %s." % replica_pid)
 		
+	def enable_replica(self):
+		"""
+			The method  resets the source status to stopped
+		"""
+		self.pg_engine.connect_db()
+		self.pg_engine.set_source_status("stopped")
+	
 	def show_errors(self):
 		"""
 			displays the error log entries if any.
