@@ -2263,7 +2263,7 @@ class pg_engine(object):
 				);
 		"""
 		self.pgsql_cur.execute(sql_save,(batch_id, schema, table,hex_row))
-		self.pgsql_cur.execute(sql_save,(batch_id, schema, table,b64_row))
+
 	
 	
 	def create_table(self,  table_metadata,table_name,  schema, metadata_type):
