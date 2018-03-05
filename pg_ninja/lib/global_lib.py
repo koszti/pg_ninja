@@ -331,15 +331,21 @@ class replica_engine(object):
 		elif self.args.tables != "*":
 			print("You cannot specify a table name when running init_replica.")
 		else:
-			self.stop_replica()
-			self.load_obfuscation()
-			source_type = self.config["sources"][self.args.source]["type"]
-			if source_type  == "mysql":
-				self.mysql_source.obfuscation = self.obfuscation
-				self.__init_mysql_replica()
-			elif source_type  == "pgsql":
-				self.pgsql_source.obfuscation = self.obfuscation
-				self.__init_pgsql_replica()
+			init_msg = 'Are you sure you want to initialise the replica for the source %s? YES/No\n'  % self.args.source
+			init_src = input(init_msg)
+			if init_src == 'YES':
+				self.stop_replica()
+				self.load_obfuscation()
+				source_type = self.config["sources"][self.args.source]["type"]
+				if source_type  == "mysql":
+					self.mysql_source.obfuscation = self.obfuscation
+					self.__init_mysql_replica()
+				elif source_type  == "pgsql":
+					self.pgsql_source.obfuscation = self.obfuscation
+					self.__init_pgsql_replica()
+			elif init_src in  self.lst_yes:
+				print('Please type YES all uppercase to confirm')
+			
 			
 			
 
