@@ -529,6 +529,10 @@ class replica_engine(object):
 		queue = mp.Queue()
 		self.sleep_loop = self.config["sources"][self.args.source]["sleep_loop"]
 		check_timeout = self.sleep_loop*10
+		self.pg_engine.connect_db()
+		self.pg_engine.clean_not_processed_batches()
+		self.pg_engine.disconnect_db()
+				
 		self.logger.info("Starting the replica daemons for source %s " % (self.args.source))
 		self.read_daemon = mp.Process(target=self.read_replica, name='read_replica', daemon=True, args=(queue,))
 		self.replay_daemon = mp.Process(target=self.replay_replica, name='replay_replica', daemon=True, args=(queue,))
@@ -575,6 +579,7 @@ class replica_engine(object):
 			self.pg_engine.connect_db()
 			self.logger.info("Checking if the replica for source %s is stopped " % (self.args.source))
 			replica_status = self.pg_engine.get_replica_status()
+			self.pg_engine.disconnect_db()
 			if replica_status in ['syncing', 'running', 'initialising']:
 				print("The replica process is already started or is syncing. Aborting the command.")
 			elif replica_status == 'error':
@@ -584,8 +589,6 @@ class replica_engine(object):
 				
 			else:
 				self.logger.info("Cleaning not processed batches for source %s" % (self.args.source))
-				self.pg_engine.clean_not_processed_batches()
-				self.pg_engine.disconnect_db()
 				if self.args.debug:
 					self.run_replica()
 				else:
