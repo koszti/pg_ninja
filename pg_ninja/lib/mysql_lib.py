@@ -109,7 +109,6 @@ class mysql_source(object):
 		self.skip_tables = {}
 		limit_tables = self.source_config["limit_tables"]
 		skip_tables = self.source_config["skip_tables"]
-		
 		if self.tables !='*':
 			tables = [table.strip() for table in self.tables.split(',')]
 			if limit_tables:
@@ -140,7 +139,9 @@ class mysql_source(object):
 					list_exclude.append(table_list[1])
 				self.skip_tables[table_list[0]]  = list_exclude
 		
-
+		self.logger.debug("limit_tables %s" % limit_tables)
+		self.logger.debug("skip_tables %s" % skip_tables)
+		
 	
 
 
