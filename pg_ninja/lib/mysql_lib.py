@@ -141,6 +141,7 @@ class mysql_source(object):
 		
 		self.logger.debug("limit_tables %s" % limit_tables)
 		self.logger.debug("skip_tables %s" % skip_tables)
+		self.logger.debug("self.schema_only  %s" % self.schema_only )
 		
 	
 
