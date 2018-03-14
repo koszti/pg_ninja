@@ -2032,7 +2032,7 @@ class pg_engine(object):
 		default_value = self.pgsql_cur.fetchone()
 		query_drop_default = b""
 		query_add_default = b""
-		if default_value:
+		if default_value[0]:
 			query_drop_default = sql.SQL(" ALTER TABLE {}.{} ALTER COLUMN {} DROP DEFAULT;").format(sql.Identifier(schema), sql.Identifier(table), sql.Identifier(column))
 			query_add_default = sql.SQL(" ALTER TABLE  {}.{} ALTER COLUMN {} SET DEFAULT %s;" % (default_value[0])).format(sql.Identifier(schema), sql.Identifier(table), sql.Identifier(column))
 			
