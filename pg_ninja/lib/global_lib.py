@@ -108,6 +108,7 @@ class replica_engine(object):
 		self.pg_engine.source = self.args.source
 		self.pg_engine.type_override = self.config["type_override"]
 		self.pg_engine.sources = self.config["sources"]
+		self.pg_engine.notifier = self.notifier
 		
 		
 		#mysql_source instance initialisation
