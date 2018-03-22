@@ -20,7 +20,7 @@ sql_up_dir = "/%s/pg_ninja/%s" % (python_lib, sql_up_path)
 
 data_files = []
 conf_files = (conf_dir, ['configuration/config-example.yml'])
-obf_files = (obf_dir, ['obfuscation/obfuscation-example.yml'])
+obf_files = (obf_dir, ['configuration/obfuscation-example.yml'])
 
 sql_src = ['sql/create_schema.sql', 'sql/drop_schema.sql']
 

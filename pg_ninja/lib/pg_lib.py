@@ -558,6 +558,7 @@ class pg_engine(object):
 	def __init__(self):
 		python_lib=get_python_lib()
 		self.sql_dir = "%s/pg_ninja/sql/" % python_lib
+		self.sql_upgrade_dir = "%s/upgrade/" % self.sql_dir
 		self.table_ddl={}
 		self.idx_ddl={}
 		self.type_ddl={}
@@ -604,6 +605,10 @@ class pg_engine(object):
 		self.logger = None
 		self.idx_sequence = 0
 		self.lock_timeout = 0
+		
+		self.migrations = [
+			{'version': '2.0.1',  'script': '200_to_201.sql'}, 
+		]
 		
 	def __del__(self):
 		"""
@@ -668,6 +673,44 @@ class pg_engine(object):
 		"""
 		self.logger.debug("Disabling the lock timeout for the session." )
 		self.pgsql_cur.execute("SET LOCK_TIMEOUT ='0';")
+	
+	def get_active_sources(self):
+		"""
+			The method counts all the sources with state not in 'ready' or 'stopped'.
+			The method assumes there is a database connection active.
+		"""
+		self.connect_db()
+		sql_get = """
+			SELECT 
+				t_source
+			FROM
+				sch_ninja.t_sources
+			WHERE
+				enm_status NOT IN ('ready','stopped')
+			;
+		"""
+		self.pgsql_cur.execute(sql_get)
+		source_get = self.pgsql_cur.fetchall()
+		self.disconnect_db()
+		return source_get
+
+	def __count_active_sources(self):
+		"""
+			The method counts all the sources with state not in 'ready' or 'stopped'.
+			The method assumes there is a database connection active.
+		"""
+		sql_count = """
+			SELECT 
+				count(*)
+			FROM
+				sch_ninja.t_sources
+			WHERE
+				enm_status NOT IN ('ready','stopped')
+			;
+		"""
+		self.pgsql_cur.execute(sql_count)
+		source_count = self.pgsql_cur.fetchone()
+		return source_count
 	
 	def create_replica_schema(self):
 		"""
@@ -3390,6 +3433,39 @@ class pg_engine(object):
 		"""
 		sql_create = sql.SQL("CREATE SCHEMA IF NOT EXISTS {};").format(sql.Identifier(schema_name))
 		self.pgsql_cur.execute(sql_create)
+
+	def upgrade_catalogue_v20(self):
+		"""
+			The method applies the migration scripts to the replica catalogue version 2.0.
+			The method checks that all sources are in stopped or ready state.
+		"""
+		sql_view = """
+			CREATE OR REPLACE VIEW sch_ninja.v_version 
+				AS
+					SELECT %s::TEXT t_version
+		;"""
+		
+		self.connect_db()
+		sources_active = self.__count_active_sources()
+		if sources_active[0] == 0:
+			catalog_version = self.get_catalog_version()
+			catalog_number = int(''.join([value  for value in catalog_version.split('.')]))
+			self.connect_db()
+			for migration in self.migrations:
+				migration_version = migration["version"]
+				migration_number = int(''.join([value  for value in migration_version.split('.')]))
+				if migration_number>=catalog_number:
+					migration_file_name = '%s/%s' % (self.sql_upgrade_dir, migration["script"])
+					print("Migrating the catalogue from version %s to version %s" % (catalog_version,  migration_version))
+					migration_data = open(migration_file_name, 'rb')
+					migration_sql = migration_data.read()
+					migration_data.close()
+					self.pgsql_cur.execute(migration_sql)
+					self.pgsql_cur.execute(sql_view, (migration_version, ))
+		else:
+			print('There are sources in running or syncing state. You shall stop all the replica processes before upgrading the catalogue.')
+			sys.exit()
+	
 
 	def upgrade_catalogue_v1(self):
 		"""
