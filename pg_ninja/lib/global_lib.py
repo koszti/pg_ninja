@@ -69,7 +69,7 @@ class replica_engine(object):
 		"""
 			Class constructor.
 		"""
-		self.catalog_version = '2.0.0'
+		self.catalog_version = '2.0.1'
 		self.upgradable_version = '0.18'
 		self.lst_yes= ['yes',  'Yes', 'y', 'Y']
 		python_lib=get_python_lib()
@@ -108,6 +108,7 @@ class replica_engine(object):
 		self.pg_engine.source = self.args.source
 		self.pg_engine.type_override = self.config["type_override"]
 		self.pg_engine.sources = self.config["sources"]
+		self.pg_engine.notifier = self.notifier
 		
 		
 		#mysql_source instance initialisation
@@ -145,6 +146,35 @@ class replica_engine(object):
 					sys.exit()
 
 		
+	def __stop_all_active_sources(self):
+		active_source = self.pg_engine.get_active_sources()
+		for source in active_source:
+			self.source = source[0]
+			self.__stop_replica()
+
+	def __stop_replica(self):
+		"""
+			The method reads the pid of the replica process for the given self.source and sends a SIGINT which 
+			tells the replica process to manage a graceful exit.
+		"""
+		replica_pid = os.path.expanduser('%s/%s.pid' % (self.config["pid_dir"],self.source))
+		if os.path.isfile(replica_pid):
+			try:
+				file_pid=open(replica_pid,'r')
+				pid=file_pid.read()
+				file_pid.close()
+				os.kill(int(pid),2)
+				print("Requesting the replica for source %s to stop" % (self.source))
+				while True:
+					try:
+						os.kill(int(pid),0)
+					except:
+						break
+				print("The replica process is stopped")
+			except:
+				print("An error occurred when trying to signal the replica process")
+
+	
 	def terminate_replica(self, signal, frame):
 		"""
 			Stops gracefully the replica.
@@ -468,6 +498,11 @@ class replica_engine(object):
 					self.pg_engine.upgrade_catalogue_v1()
 				elif upg_cat in  self.lst_yes:
 					print('Please type YES all uppercase to confirm')
+			elif catalog_version.split('.')[0] == '2' and catalog_version.split('.')[1] == '0':
+				print('Stopping all the active sources.')
+				self.__stop_all_active_sources()
+				print('Upgrading the replica catalogue. ')
+				self.pg_engine.upgrade_catalogue_v20()
 			elif catalog_version.split('.')[0] == '1':
 				print('Wrong starting version. Expected %s, got %s') % (catalog_version, self.upgradable_version)
 				sys.exit()
@@ -743,6 +778,32 @@ class replica_engine(object):
 			if tables_no_replica[2]:
 				print('\n== Tables with replica disabled ==')
 				print("\n".join(tables_no_replica[2]))
+
+	def run_maintenance(self):
+		"""
+			The method runs a maintenance process on the target postgresql database specified in the given source.
+		"""
+		maintenance_pid = os.path.expanduser('%s/%s_maintenance.pid' % (self.config["pid_dir"],self.args.source))
+		if self.args.source == "*":
+			print("You must specify a source name with the argument --source")
+		else:
+			if self.args.debug:
+				self.pg_engine.run_maintenance()
+			else:
+				if self.config["log_dest"]  == 'stdout':
+					foreground = True
+				else:
+					self.logger.info("Starting the maintenance on the source %s" % (self.args.source, ))
+					foreground = False
+					print("Starting the maintenance process for source %s" % (self.args.source))
+					keep_fds = [self.logger_fds]
+					
+					app_name = "%s_maintenance" % self.args.source
+					maintenance_daemon = Daemonize(app=app_name, pid=maintenance_pid, action=self.pg_engine.run_maintenance, foreground=foreground , keep_fds=keep_fds)
+					try:
+						maintenance_daemon.start()
+					except:
+						print("The  maintenance process is already started. Aborting the command.")
 			
 			
 	def __init_logger(self):

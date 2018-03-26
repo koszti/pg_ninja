@@ -4,7 +4,7 @@ CREATE SCHEMA IF NOT EXISTS sch_ninja;
 --VIEWS
 CREATE OR REPLACE VIEW sch_ninja.v_version 
  AS
-	SELECT '2.0.0'::TEXT t_version
+	SELECT '2.0.1'::TEXT t_version
 ;
 
 --TYPES
@@ -36,7 +36,7 @@ CREATE TABLE sch_ninja.t_error_log
 	v_schema_name character varying(100) NOT NULL,
 	t_table_pkey text NOT NULL,
 	t_binlog_name text NOT NULL,
-	i_binlog_position integer NOT NULL,
+	i_binlog_position bigint NOT NULL,
 	ts_error	timestamp without time zone,
 	t_sql text,
 	t_error_message text,
@@ -52,17 +52,21 @@ CREATE TABLE sch_ninja.t_sources
 	jsb_schema_mappings	jsonb NOT NULL,
 	enm_status sch_ninja.en_src_status NOT NULL DEFAULT 'ready',
 	t_binlog_name text,
-	i_binlog_position integer,
+	i_binlog_position bigint,
 	b_consistent boolean NOT NULL DEFAULT TRUE,
+	b_paused boolean NOT NULL DEFAULT False,
+	ts_last_maintenance timestamp without time zone NULL,
 	v_log_table character varying[] ,
 	CONSTRAINT pk_t_sources PRIMARY KEY (i_id_source)
 )
 ;
 
+
 CREATE TABLE sch_ninja.t_last_received
 (
 	i_id_source			bigserial,
 	ts_last_received timestamp without time zone,
+	b_paused boolean NOT NULL DEFAULT False,
 	CONSTRAINT pk_t_last_received PRIMARY KEY (i_id_source),
 	CONSTRAINT fk_last_received_id_source FOREIGN KEY (i_id_source) 
 	REFERENCES  sch_ninja.t_sources(i_id_source)
@@ -74,6 +78,7 @@ CREATE TABLE sch_ninja.t_last_replayed
 (
 	i_id_source			bigserial,
 	ts_last_replayed timestamp without time zone,
+	b_paused boolean NOT NULL DEFAULT False,
 	CONSTRAINT pk_t_last_replayed PRIMARY KEY (i_id_source),
 	CONSTRAINT fk_last_replayed_id_source FOREIGN KEY (i_id_source) 
 	REFERENCES  sch_ninja.t_sources(i_id_source)
@@ -89,7 +94,7 @@ CREATE TABLE sch_ninja.t_replica_batch
   i_id_batch bigserial NOT NULL,
   i_id_source bigint NOT NULL,
   t_binlog_name text,
-  i_binlog_position integer,
+  i_binlog_position bigint,
   b_started boolean NOT NULL DEFAULT False,
   b_processed boolean NOT NULL DEFAULT False,
   b_replayed boolean NOT NULL DEFAULT False,
@@ -119,7 +124,7 @@ CREATE TABLE IF NOT EXISTS sch_ninja.t_log_replica
   v_schema_name character varying(100) NOT NULL,
   enm_binlog_event sch_ninja.en_binlog_event NOT NULL,
   t_binlog_name text,
-  i_binlog_position integer,
+  i_binlog_position bigint,
   ts_event_datetime timestamp without time zone NOT NULL DEFAULT clock_timestamp(),
   jsb_event_after jsonb,
   jsb_event_before jsonb,
@@ -141,7 +146,7 @@ CREATE TABLE sch_ninja.t_replica_tables
   v_schema_name character varying(100) NOT NULL,
   v_table_pkey character varying(100)[] NOT NULL,
   t_binlog_name text,
-  i_binlog_position integer,
+  i_binlog_position bigint,
   b_replica_enabled boolean NOT NULL DEFAULT true,
   CONSTRAINT pk_t_replica_tables PRIMARY KEY (i_id_table)
 )

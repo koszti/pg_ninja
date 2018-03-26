@@ -558,6 +558,7 @@ class pg_engine(object):
 	def __init__(self):
 		python_lib=get_python_lib()
 		self.sql_dir = "%s/pg_ninja/sql/" % python_lib
+		self.sql_upgrade_dir = "%s/upgrade/" % self.sql_dir
 		self.table_ddl={}
 		self.idx_ddl={}
 		self.type_ddl={}
@@ -604,6 +605,10 @@ class pg_engine(object):
 		self.logger = None
 		self.idx_sequence = 0
 		self.lock_timeout = 0
+		
+		self.migrations = [
+			{'version': '2.0.1',  'script': '200_to_201.sql'}, 
+		]
 		
 	def __del__(self):
 		"""
@@ -668,6 +673,44 @@ class pg_engine(object):
 		"""
 		self.logger.debug("Disabling the lock timeout for the session." )
 		self.pgsql_cur.execute("SET LOCK_TIMEOUT ='0';")
+	
+	def get_active_sources(self):
+		"""
+			The method counts all the sources with state not in 'ready' or 'stopped'.
+			The method assumes there is a database connection active.
+		"""
+		self.connect_db()
+		sql_get = """
+			SELECT 
+				t_source
+			FROM
+				sch_ninja.t_sources
+			WHERE
+				enm_status NOT IN ('ready','stopped')
+			;
+		"""
+		self.pgsql_cur.execute(sql_get)
+		source_get = self.pgsql_cur.fetchall()
+		self.disconnect_db()
+		return source_get
+
+	def __count_active_sources(self):
+		"""
+			The method counts all the sources with state not in 'ready' or 'stopped'.
+			The method assumes there is a database connection active.
+		"""
+		sql_count = """
+			SELECT 
+				count(*)
+			FROM
+				sch_ninja.t_sources
+			WHERE
+				enm_status NOT IN ('ready','stopped')
+			;
+		"""
+		self.pgsql_cur.execute(sql_count)
+		source_count = self.pgsql_cur.fetchone()
+		return source_count
 	
 	def create_replica_schema(self):
 		"""
@@ -799,23 +842,28 @@ class pg_engine(object):
 			
 		"""
 		tables_error = []
-		continue_loop = True
-		self.source_config = self.sources[self.source]
-		replay_max_rows = self.source_config["replay_max_rows"]
-		exit_on_error = True if self.source_config["on_error_replay"]=='exit' else False
-		while continue_loop:
-			sql_replay = """SELECT * FROM sch_ninja.fn_replay_mysql(%s,%s,%s)""";
-			self.pgsql_cur.execute(sql_replay, (replay_max_rows, self.i_id_source, exit_on_error))
-			replay_status = self.pgsql_cur.fetchone()
-			if replay_status[0]:
-				self.logger.debug("Replayed %s rows for source %s" % (replay_max_rows, self.source) )
-			continue_loop = replay_status[0]
-			function_error = replay_status[1]
-			if function_error:
-				raise Exception('The replay process crashed')
-			if replay_status[2]:
-				tables_error.append(replay_status[2])
-		self. __cleanup_replayed_batches()		
+		replica_paused = self.get_replica_paused()
+		if replica_paused:
+			self.logger.info("Replay replica is paused")
+			self.set_replay_paused(True)
+		else:
+			continue_loop = True
+			self.source_config = self.sources[self.source]
+			replay_max_rows = self.source_config["replay_max_rows"]
+			exit_on_error = True if self.source_config["on_error_replay"]=='exit' else False
+			while continue_loop:
+				sql_replay = """SELECT * FROM sch_ninja.fn_replay_mysql(%s,%s,%s)""";
+				self.pgsql_cur.execute(sql_replay, (replay_max_rows, self.i_id_source, exit_on_error))
+				replay_status = self.pgsql_cur.fetchone()
+				if replay_status[0]:
+					self.logger.debug("Replayed %s rows for source %s" % (replay_max_rows, self.source) )
+				continue_loop = replay_status[0]
+				function_error = replay_status[1]
+				if function_error:
+					raise Exception('The replay process crashed')
+				if replay_status[2]:
+					tables_error.append(replay_status[2])
+			self. __cleanup_replayed_batches()		
 		return tables_error
 			
 	
@@ -3391,6 +3439,39 @@ class pg_engine(object):
 		sql_create = sql.SQL("CREATE SCHEMA IF NOT EXISTS {};").format(sql.Identifier(schema_name))
 		self.pgsql_cur.execute(sql_create)
 
+	def upgrade_catalogue_v20(self):
+		"""
+			The method applies the migration scripts to the replica catalogue version 2.0.
+			The method checks that all sources are in stopped or ready state.
+		"""
+		sql_view = """
+			CREATE OR REPLACE VIEW sch_ninja.v_version 
+				AS
+					SELECT %s::TEXT t_version
+		;"""
+		
+		self.connect_db()
+		sources_active = self.__count_active_sources()
+		if sources_active[0] == 0:
+			catalog_version = self.get_catalog_version()
+			catalog_number = int(''.join([value  for value in catalog_version.split('.')]))
+			self.connect_db()
+			for migration in self.migrations:
+				migration_version = migration["version"]
+				migration_number = int(''.join([value  for value in migration_version.split('.')]))
+				if migration_number>=catalog_number:
+					migration_file_name = '%s/%s' % (self.sql_upgrade_dir, migration["script"])
+					print("Migrating the catalogue from version %s to version %s" % (catalog_version,  migration_version))
+					migration_data = open(migration_file_name, 'rb')
+					migration_sql = migration_data.read()
+					migration_data.close()
+					self.pgsql_cur.execute(migration_sql)
+					self.pgsql_cur.execute(sql_view, (migration_version, ))
+		else:
+			print('There are sources in running or syncing state. You shall stop all the replica processes before upgrading the catalogue.')
+			sys.exit()
+	
+
 	def upgrade_catalogue_v1(self):
 		"""
 			The method upgrade a replica catalogue  from version 1 to version 2.
@@ -3653,6 +3734,224 @@ class pg_engine(object):
 			self.logger.info("The old schema %s does not exists, aborting the rollback" % (self.__v1_schema))
 			sys.exit()
 		self.logger.info("Rollback successful. Please note the catalogue version 2 has been renamed to %s for debugging.\nYou will need to drop it before running another upgrade" % (self.__v2_schema, ))
+
+	def set_read_paused(self, read_paused):
+		"""
+			The method sets the read proces flag b_paused to true for the given source.
+			The update is performed for the given source and for the negation of b_paused.
+			This approach will prevent unnecessary updates on the table t_last_received.
+			
+			:param read_paused: the flag to set for the read replica process.
+		"""
+		not_read_paused = not read_paused
+		sql_pause = """
+			UPDATE sch_ninja.t_last_received 
+				SET b_paused=%s
+			WHERE 
+					i_id_source=%s 
+				AND	b_paused=%s
+			;
+		"""
+		self.pgsql_cur.execute(sql_pause, (read_paused, self.i_id_source, not_read_paused))
+		
+	def set_replay_paused(self, read_paused):
+		"""
+			The method sets the read proces flag b_paused to true for the given source.
+			The update is performed for the given source and for the negation of b_paused.
+			This approach will prevent unnecessary updates on the table t_last_received.
+			
+			:param read_paused: the flag to set for the read replica process.
+		"""
+		not_read_paused = not read_paused
+		sql_pause = """
+			UPDATE sch_ninja.t_last_replayed
+				SET b_paused=%s
+			WHERE 
+					i_id_source=%s 
+				AND	b_paused=%s
+			;
+		"""
+		self.pgsql_cur.execute(sql_pause, (read_paused, self.i_id_source, not_read_paused))
+	
+	def __pause_replica(self):
+		"""
+			The method pause the replica updating the b_paused flag for all the sources in the target database
+		"""
+		sql_pause = """
+			UPDATE sch_ninja.t_sources 
+				SET b_paused='t' 
+			WHERE 
+				i_id_source=%s;
+		"""
+		self.pgsql_cur.execute(sql_pause, (self.i_id_source, ))
+	
+	def __resume_replica(self):
+		"""
+			The method resumes the replica updating the b_paused flag for all the sources in the target database
+		"""
+		sql_resume = """
+			UPDATE sch_ninja.t_sources 
+				SET b_paused='f' 
+			WHERE 
+				i_id_source=%s;
+		"""
+		self.pgsql_cur.execute(sql_resume, (self.i_id_source, ))
+	
+	def __set_last_maintenance(self):
+		"""
+			The method updates the field ts_last_maintenance for the given source in the table t_sources
+		"""
+		sql_set = """
+			UPDATE sch_ninja.t_sources 
+				SET ts_last_maintenance=now() 
+			WHERE 
+				i_id_source=%s;
+		"""
+		self.pgsql_cur.execute(sql_set, (self.i_id_source, ))
+	
+	
+	def get_replica_paused(self):
+		"""
+			The method returns the status of the replica. This value is used in both read/replay replica methods for updating the corresponding flags.
+			:return: the b_paused flag for the current source
+			:rtype: boolean
+		"""
+		sql_get = """
+			SELECT 
+				b_paused 
+			FROM 
+				sch_ninja.t_sources 
+			WHERE 
+				i_id_source=%s
+			;
+		"""
+		self.pgsql_cur.execute(sql_get, (self.i_id_source, ))
+		replica_paused = self.pgsql_cur.fetchone()
+		return replica_paused[0]
+	
+	def __wait_for_pause(self):
+		"""
+			The method returns the status of the replica. This value is used in both read/replay replica methods for updating the corresponding flags.
+			:return: the b_paused flag for the current source
+			:rtype: boolean
+		"""
+		sql_wait = """
+			SELECT 
+				CASE
+					WHEN src.enm_status IN ('stopped','initialised','synced')
+						THEN 'proceed'
+					WHEN src.enm_status = 'running'
+						THEN 
+							CASE
+								WHEN 
+										src.b_paused 
+									AND	rcv.b_paused
+									AND	rep.b_paused
+								THEN
+									'proceed'
+								WHEN 
+										src.b_paused 
+								THEN
+									'wait'
+								ELSE
+									'abort'
+							END
+					ELSE
+						'abort'
+				END AS t_action,
+				src.enm_status,
+				rcv.b_paused,
+				rep.b_paused,
+				src.b_paused
+				
+			FROM 
+				sch_ninja.t_sources src
+				INNER JOIN sch_ninja.t_last_received rcv
+				ON
+					src.i_id_source=rcv.i_id_source
+				INNER JOIN sch_ninja.t_last_replayed rep
+				ON
+					src.i_id_source=rep.i_id_source
+				
+			WHERE 
+					src.i_id_source=%s
+			;
+		"""
+		self.logger.info("Waiting for the replica daemons to pause")
+		wait_result = 'wait'
+		while wait_result == 'wait':
+			self.pgsql_cur.execute(sql_wait, (self.i_id_source, ))
+			wait_result = self.pgsql_cur.fetchone()[0]
+			time.sleep(10)
+		
+		return wait_result
+		
+	def __vacuum_log_tables(self):
+		"""
+			The method runs a VACUUM FULL on the log tables for the given source after detaching them from the parent table.
+		"""
+		sql_inherit = """
+			SELECT 
+				format('ALTER TABLE sch_ninja.%%I %%s INHERIT sch_ninja.t_log_replica;',
+				v_log_table,
+				%s
+				),
+				v_log_table,
+				format('VACUUM FULL sch_ninja.%%I ;',
+				v_log_table
+				)
+			FROM
+			(
+			SELECT 
+				unnest(v_log_table) AS v_log_table 
+			FROM 
+				sch_ninja.t_sources 
+			WHERE 
+				i_id_source=%s
+			) log
+			;
+		"""
+		self.pgsql_cur.execute(sql_inherit, ('NO',  self.i_id_source))
+		detach_sql = self.pgsql_cur.fetchall()
+		for sql_stat in detach_sql:
+			self.logger.info("Detaching the table %s" % (sql_stat[1]))
+			self.pgsql_cur.execute(sql_stat[0])
+		for sql_stat in detach_sql:
+			self.logger.info("Running VACUUM FULL on the table %s" % (sql_stat[1]))
+			try:
+				self.pgsql_cur.execute(sql_stat[2])
+			except:
+				self.logger.error("An error occurred when running VACUUM FULL on the table %s" % (sql_stat[1]))
+		self.pgsql_cur.execute(sql_inherit, ('',  self.i_id_source))
+		attach_sql = self.pgsql_cur.fetchall()
+		for sql_stat in attach_sql:
+			self.logger.info("Attaching the table %s" % (sql_stat[1]))
+			self.pgsql_cur.execute(sql_stat[0])
+
+
+	def run_maintenance(self):
+		"""
+			The method runs the maintenance for the given source.
+			After the replica daemons are paused the procedure detach the log tables from the parent log table and performs a VACUUM FULL againts the tables.
+			If any error occurs the tables are attached to the parent table and the replica daemons resumed.
+			
+		"""
+		self.logger.info("Pausing the replica daemons")
+		self.connect_db()
+		self.set_source_id()
+		self.__pause_replica()
+		wait_result = self.__wait_for_pause()
+		if wait_result == 'abort':
+			self.logger.error("Cannot proceed with the maintenance")
+			return wait_result
+		self.__vacuum_log_tables()
+		self.__set_last_maintenance()
+		self.logger.info("Resuming the replica daemons")
+		self.__resume_replica()
+		self.disconnect_db()
+		notifier_message = "maintenance for source %s is complete" % self.source
+		self.notifier.send_message(notifier_message, 'info')
+		self.logger.info(notifier_message)
 
 
 	def drop_database_schema(self, schema_name, cascade):

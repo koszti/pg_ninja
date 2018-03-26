@@ -114,8 +114,8 @@ class mysql_source(object):
 		
 		if self.tables !='*':
 			tables = [table.strip() for table in self.tables.split(',')]
-			limit_schemas = [table.split('.')[0] for table in limit_tables]
 			if limit_tables:
+				limit_schemas = [table.split('.')[0] for table in limit_tables]
 				limit_tables = [table for table in tables if table in limit_tables or table.split('.')[0] not in limit_schemas]
 			else:
 				limit_tables = tables
@@ -428,7 +428,11 @@ class mysql_source(object):
 		column_list = select_columns["column_list"]
 		self.logger.debug("Executing query for table %s.%s"  % (schema, table ))
 		self.connect_db_unbuffered()
-		self.cursor_unbuffered.execute(sql_csv)
+		try:
+			self.cursor_unbuffered.execute(sql_csv)
+		except pymysql.Error as e:
+			self.logger.debug("Could not get data from table %s.%s"  % (schema, table ))
+			print('Got error {!r}, errno is {}'.format(e, e.args[0]))
 		while True:
 			csv_results = self.cursor_unbuffered.fetchmany(copy_limit)
 			if len(csv_results) == 0:
@@ -1093,28 +1097,33 @@ class mysql_source(object):
 		"""
 		self.__init_read_replica()
 		self.pg_engine.set_source_status("running")
-		
-		batch_data = self.pg_engine.get_batch_data()
-		if len(batch_data)>0:
-			id_batch=batch_data[0][0]
-			replica_data=self.read_replica_stream(batch_data)
-			master_data=replica_data[0]
-			close_batch=replica_data[1]
-			if close_batch:
-				self.master_status=[]
-				self.master_status.append(master_data)
-				self.logger.debug("trying to save the master data...")
-				next_id_batch=self.pg_engine.save_master_status(self.master_status)
-				if next_id_batch:
-					self.logger.debug("new batch created, saving id_batch %s in class variable" % (id_batch))
-					self.id_batch=id_batch
-				else:
-					self.logger.debug("batch not saved. using old id_batch %s" % (self.id_batch))
-				if self.id_batch:
-					self.logger.debug("updating processed flag for id_batch %s", (id_batch))
-					self.pg_engine.set_batch_processed(id_batch)
-					self.id_batch=None
-		self.pg_engine.check_source_consistent()
+		replica_paused = self.pg_engine.get_replica_paused()
+		if replica_paused:
+			self.logger.info("Read replica is paused")
+			self.pg_engine.set_read_paused(True)
+		else:
+			
+			batch_data = self.pg_engine.get_batch_data()
+			if len(batch_data)>0:
+				id_batch=batch_data[0][0]
+				replica_data=self.read_replica_stream(batch_data)
+				master_data=replica_data[0]
+				close_batch=replica_data[1]
+				if close_batch:
+					self.master_status=[]
+					self.master_status.append(master_data)
+					self.logger.debug("trying to save the master data...")
+					next_id_batch=self.pg_engine.save_master_status(self.master_status)
+					if next_id_batch:
+						self.logger.debug("new batch created, saving id_batch %s in class variable" % (id_batch))
+						self.id_batch=id_batch
+					else:
+						self.logger.debug("batch not saved. using old id_batch %s" % (self.id_batch))
+					if self.id_batch:
+						self.logger.debug("updating processed flag for id_batch %s", (id_batch))
+						self.pg_engine.set_batch_processed(id_batch)
+						self.id_batch=None
+			self.pg_engine.check_source_consistent()
 		self.disconnect_db_buffered()
 
 	def __refresh_obfuscation(self):
