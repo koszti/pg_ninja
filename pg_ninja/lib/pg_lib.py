@@ -608,6 +608,7 @@ class pg_engine(object):
 		
 		self.migrations = [
 			{'version': '2.0.1',  'script': '200_to_201.sql'}, 
+			{'version': '2.0.2',  'script': '201_to_202.sql'}, 
 		]
 		
 	def __del__(self):
@@ -3459,7 +3460,7 @@ class pg_engine(object):
 			for migration in self.migrations:
 				migration_version = migration["version"]
 				migration_number = int(''.join([value  for value in migration_version.split('.')]))
-				if migration_number>=catalog_number:
+				if migration_number>catalog_number:
 					migration_file_name = '%s/%s' % (self.sql_upgrade_dir, migration["script"])
 					print("Migrating the catalogue from version %s to version %s" % (catalog_version,  migration_version))
 					migration_data = open(migration_file_name, 'rb')
