@@ -4,7 +4,7 @@ CREATE SCHEMA IF NOT EXISTS sch_ninja;
 --VIEWS
 CREATE OR REPLACE VIEW sch_ninja.v_version 
  AS
-	SELECT '2.0.1'::TEXT t_version
+	SELECT '2.0.2'::TEXT t_version
 ;
 
 --TYPES
@@ -55,6 +55,7 @@ CREATE TABLE sch_ninja.t_sources
 	i_binlog_position bigint,
 	b_consistent boolean NOT NULL DEFAULT TRUE,
 	b_paused boolean NOT NULL DEFAULT False,
+	b_maintenance boolean NOT NULL DEFAULT False,
 	ts_last_maintenance timestamp without time zone NULL,
 	v_log_table character varying[] ,
 	CONSTRAINT pk_t_sources PRIMARY KEY (i_id_source)
