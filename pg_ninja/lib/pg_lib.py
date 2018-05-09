@@ -3998,53 +3998,69 @@ class pg_engine(object):
 		
 		return wait_result
 		
-	def __vacuum_log_tables(self):
+
+	def __vacuum_full_log_tables(self):
 		"""
-			The method runs a VACUUM FULL on the log tables for the given source after detaching them from the parent table.
+			The method runs a VACUUM FULL on the log tables for the given source 
 		"""
-		sql_inherit = """
+		sql_vacuum = """
 			SELECT 
-				format('ALTER TABLE sch_ninja.%%I %%s INHERIT sch_ninja.t_log_replica;',
-				v_log_table,
-				%s
-				),
 				v_log_table,
 				format('VACUUM FULL sch_ninja.%%I ;',
 				v_log_table
 				)
 			FROM
 			(
-			SELECT 
-				unnest(v_log_table) AS v_log_table 
-			FROM 
-				sch_ninja.t_sources 
-			WHERE 
-				i_id_source=%s
+				SELECT 
+					unnest(v_log_table) AS v_log_table 
+				FROM 
+					sch_ninja.t_sources 
+				WHERE 
+					i_id_source=%s
 			) log
 			;
 		"""
-		self.pgsql_cur.execute(sql_inherit, ('NO',  self.i_id_source))
-		detach_sql = self.pgsql_cur.fetchall()
-		self.__pause_replica(others=True)
-		self.__wait_for_other_pause()
-		for sql_stat in detach_sql:
-			self.logger.info("Detaching the table %s" % (sql_stat[1]))
-			self.pgsql_cur.execute(sql_stat[0])
-		self.__resume_replica(others=True)
-		for sql_stat in detach_sql:
-			self.logger.info("Running VACUUM FULL on the table %s" % (sql_stat[1]))
+		self.pgsql_cur.execute(sql_vacuum, (self.i_id_source, ))
+		vacuum_sql = self.pgsql_cur.fetchall()
+		for sql_stat in vacuum_sql:
+			self.logger.info("Running VACUUM FULL on the table %s" % (sql_stat[0]))
 			try:
-				self.pgsql_cur.execute(sql_stat[2])
+				self.pgsql_cur.execute(sql_stat[1])
 			except:
-				self.logger.error("An error occurred when running VACUUM FULL on the table %s" % (sql_stat[1]))
-		self.pgsql_cur.execute(sql_inherit, ('',  self.i_id_source))
-		attach_sql = self.pgsql_cur.fetchall()
-		self.__pause_replica(others=True)
-		self.__wait_for_other_pause()
-		for sql_stat in attach_sql:
-			self.logger.info("Attaching the table %s" % (sql_stat[1]))
-			self.pgsql_cur.execute(sql_stat[0])
-		self.__resume_replica(others=True)
+				self.logger.error("An error occurred when running VACUUM FULL on the table %s" % (sql_stat[0]))
+		
+		
+		
+	def __vacuum_log_tables(self):
+		"""
+			The method runs a VACUUM on the log tables for the given source 
+		"""
+		sql_vacuum = """
+			SELECT 
+				v_log_table,
+				format('VACUUM sch_ninja.%%I ;',
+				v_log_table
+				)
+			FROM
+			(
+				SELECT 
+					unnest(v_log_table) AS v_log_table 
+				FROM 
+					sch_ninja.t_sources 
+				WHERE 
+					i_id_source=%s
+			) log
+			;
+		"""
+		self.pgsql_cur.execute(sql_vacuum, (self.i_id_source, ))
+		vacuum_sql = self.pgsql_cur.fetchall()
+		for sql_stat in vacuum_sql:
+			self.logger.info("Running VACUUM on the table %s" % (sql_stat[0]))
+			try:
+				self.pgsql_cur.execute(sql_stat[1])
+			except:
+				self.logger.error("An error occurred when running VACUUM on the table %s" % (sql_stat[0]))
+
 
 	def run_maintenance(self):
 		"""
@@ -4064,7 +4080,10 @@ class pg_engine(object):
 			if wait_result == 'abort':
 				self.logger.error("Cannot proceed with the maintenance")
 				return wait_result
-			self.__vacuum_log_tables()
+			if self.full:
+				self.__vacuum_full_log_tables()
+			else:
+				self.__vacuum_log_tables()
 			self.__set_last_maintenance()
 			self.logger.info("Resuming the replica daemons")
 			self.__resume_replica(others=False)
