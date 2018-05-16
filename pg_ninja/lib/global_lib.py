@@ -574,6 +574,11 @@ class replica_engine(object):
 			It can be daemonised or run in foreground according with the --debug configuration or the log 
 			destination.
 		"""
+		if "auto_maintenance" not in  self.config["sources"][self.args.source]:
+			auto_maintenance = "disabled" 
+		else:
+			auto_maintenance = self.config["sources"][self.args.source]["auto_maintenance"]
+		
 		
 		log_read = self.__init_logger("read")
 		log_replay = self.__init_logger("replay")
@@ -582,7 +587,11 @@ class replica_engine(object):
 		signal.signal(signal.SIGINT, self.terminate_replica)
 		queue = mp.Queue()
 		self.sleep_loop = self.config["sources"][self.args.source]["sleep_loop"]
-		check_timeout = self.sleep_loop*10
+		if self.args.debug:
+			check_timeout = self.sleep_loop
+		else:
+			check_timeout = self.sleep_loop*10
+		
 		self.pg_engine.connect_db()
 		self.pg_engine.clean_not_processed_batches()
 		self.pg_engine.disconnect_db()
@@ -617,6 +626,14 @@ class replica_engine(object):
 					
 				break
 			time.sleep(check_timeout)
+			if auto_maintenance != "disabled":
+				self.pg_engine.auto_maintenance = auto_maintenance
+				self.pg_engine.connect_db()
+				run_maintenance = self.pg_engine.check_auto_maintenance()
+				self.pg_engine.disconnect_db()
+				if run_maintenance:
+					self.pg_engine.run_maintenance()
+			
 		self.logger.info("Replica process for source %s ended" % (self.args.source))	
 
 	def start_replica(self):
@@ -731,16 +748,21 @@ class replica_engine(object):
 
 	def show_status(self):
 		"""
-			list the replica status using the configuration files and the replica catalogue 
-			
+			list the replica status from the replica catalogue.
+			If the source is specified gives some extra details on the source status.
 		"""
+		if "auto_maintenance" not in  self.config["sources"][self.args.source]:
+			self.pg_engine.auto_maintenance = "disabled" 
+		else:
+			self.pg_engine.auto_maintenance = self.config["sources"][self.args.source]["auto_maintenance"]
+			
 		self.pg_engine.source = self.args.source
 		configuration_data = self.pg_engine.get_status()
 		configuration_status = configuration_data[0]
 		schema_mappings = configuration_data[1]
 		table_status = configuration_data[2]
 		replica_counters = configuration_data[3]
-		tab_headers = ['Source id',  'Source name',  'Status', 'Consistent' ,  'Read lag',  'Last read',  'Replay lag' , 'Last replay']
+		tab_headers = ['Source id',  'Source name', 'Status', 'Consistent' ,  'Read lag',  'Last read',  'Replay lag' , 'Last replay']
 		tab_body = []
 		for status in configuration_status:
 			source_id = status[0]
@@ -751,18 +773,19 @@ class replica_engine(object):
 			replay_lag = status[5]
 			last_replay = status[6]
 			consistent = status[7]
-			tab_row = [source_id, source_name,  source_status, consistent,  read_lag, last_read,  replay_lag, last_replay]
+			last_maintenance = status[8]
+			next_maintenance = status[9]
+			tab_row = [source_id, source_name, source_status, consistent,  read_lag, last_read,  replay_lag, last_replay]
 			tab_body.append(tab_row)
 		print(tabulate(tab_body, headers=tab_headers, tablefmt="simple"))
 		if schema_mappings:
 			print('\n== Schema mappings ==')
-			tab_headers = ['Origin schema',  'Destination schema', 'Obfuscated schema']
+			tab_headers = ['Origin schema',  'Destination schema']
 			tab_body = []
 			for mapping in schema_mappings:
 				origin_schema =  mapping[0]
 				destination_schema=  mapping[1]
-				obfuscated_schema =  mapping[2]
-				tab_row = [origin_schema, destination_schema, obfuscated_schema]
+				tab_row = [origin_schema, destination_schema]
 				tab_body.append(tab_row)
 			print(tabulate(tab_body, headers=tab_headers, tablefmt="simple"))
 		if table_status:
@@ -778,7 +801,10 @@ class replica_engine(object):
 			tables_all= table_status[2]
 			tab_row = ['All tables', tables_all[1]]
 			tab_body.append(tab_row)
-			print(tabulate(tab_body, tablefmt="simple"))
+			tab_row = ['Last maintenance', last_maintenance]
+			tab_body.append(tab_row)
+			tab_row = ['Next maintenance', next_maintenance]
+			tab_body.append(tab_row)
 			if replica_counters:
 				tab_row = ['Replayed rows', replica_counters[0]]
 				tab_body.append(tab_row)

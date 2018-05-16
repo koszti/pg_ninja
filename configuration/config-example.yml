@@ -52,6 +52,7 @@ sources:
         sleep_loop: 1
         on_error_replay: 'exit'
         obfuscation_file: '~/.pg_ninja/obfuscation/obfuscation-example.yml'
+        auto_maintenance: "1 day"
         type: mysql
 
 # type_override allows the user to override the default type conversion into a different one. 
