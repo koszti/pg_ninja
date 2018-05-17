@@ -730,6 +730,31 @@ class pg_engine(object):
 		else:
 			self.logger.warning("The replica schema is already present.")
 	
+	def check_auto_maintenance(self):
+		"""
+			This method checks if the the maintenance for the given source is required. 
+			The SQL compares the last maintenance stored in the replica catalogue with the NOW() function.
+			If the value is bigger than the configuration parameter auto_maintenance then it returns true.
+			Otherwise returns false.
+			
+			:return: flag which tells if the maintenance should run or not
+			:rtype: boolean
+
+		"""
+		self.set_source_id()
+		sql_maintenance = """
+			SELECT 
+				now()-coalesce(ts_last_maintenance,now())>%s::interval 
+			FROM 
+				sch_ninja.t_sources 
+			WHERE 
+				i_id_source=%s;
+		"""
+		self.pgsql_cur.execute(sql_maintenance, (self.auto_maintenance, self.i_id_source, ))
+		maintenance = self.pgsql_cur.fetchone()
+		return maintenance[0]
+	
+	
 	def get_inconsistent_tables(self):
 		"""
 			The method collects the tables in not consistent state.
@@ -1841,7 +1866,9 @@ class pg_engine(object):
 			source_filter = ""
 			
 		else:
+			source_filter = (self.pgsql_cur.mogrify(""" WHERE  src.t_source=%s """, (self.source, ))).decode()
 			self.set_source_id()
+			
 			sql_counters = """
 				SELECT 
 					sum(i_replayed) as total_replayed, 
@@ -1857,13 +1884,10 @@ class pg_engine(object):
 			replica_counters = self.pgsql_cur.fetchone()
 			
 			
-			source_filter = (self.pgsql_cur.mogrify(""" WHERE  src.t_source=%s """, (self.source, ))).decode()
-			
 			sql_mappings = """
 				SELECT 
 					(mappings).key as origin_schema,
-					(((mappings).value)::json)->>'clear' destination_schema,
-					(((mappings).value)::json)->>'obfuscate' obfuscated_schema
+					(mappings).value destination_schema
 				FROM
 
 				(
@@ -1876,7 +1900,6 @@ class pg_engine(object):
 
 				) sch
 				;
-
 			"""
 			
 			sql_tab_status = """
@@ -1967,7 +1990,9 @@ class pg_engine(object):
 						'Yes'
 					ELSE
 						'No'
-				END as consistent_status
+				END as consistent_status,
+				coalesce(date_trunc('seconds',ts_last_maintenance)::text,'N/A') as last_maintenance,
+				coalesce(date_trunc('seconds',ts_last_maintenance+nullif(%%s,'disabled')::interval)::text,'N/A') AS next_maintenance
 				
 				
 			FROM 
@@ -1980,10 +2005,13 @@ class pg_engine(object):
 			;
 			
 		""" % (source_filter, )
-		self.pgsql_cur.execute(sql_status)
+		self.pgsql_cur.execute(sql_status, (self.auto_maintenance, ))
 		configuration_status = self.pgsql_cur.fetchall()
+		
+		
+		
 		self.disconnect_db()
-		return [configuration_status, schema_mappings, table_status,replica_counters]
+		return [configuration_status, schema_mappings, table_status, replica_counters]
 		
 	def insert_source_timings(self):
 		"""
@@ -3775,20 +3803,19 @@ class pg_engine(object):
 		self.pgsql_cur.execute(sql_pause, (read_paused, self.i_id_source, not_read_paused))
 	
 
-	def __count_maintenance_src(self):
+	def __check_maintenance(self):
 		"""
-			The method counts if the number of other sources in maintenance status using i_id_source and the flag b_maintenance.
-			:return: the the number of sources in maintenance status
-			:rtype: integer
+			The method returns the flag b_maintenance for the current source.
+			:return: 
+			:rtype: boolean
 		"""
 		sql_count = """
 			SELECT 
-				count(*) 
+				b_maintenance
 			FROM 
 				sch_ninja.t_sources 
 			WHERE 
-					i_id_source<>%s
-				AND	b_maintenance='t'
+					i_id_source=%s
 			;
 		"""
 		self.pgsql_cur.execute(sql_count, (self.i_id_source, ))
@@ -4072,8 +4099,10 @@ class pg_engine(object):
 		self.logger.info("Pausing the replica daemons")
 		self.connect_db()
 		self.set_source_id()
-		count_maintenance = self.__count_maintenance_src()
-		if count_maintenance == 0:
+		check_maintenance = self.__check_maintenance()
+		if check_maintenance:
+			self.logger.info("The source is already in maintenance. Skipping the maintenance run.")
+		else:
 			self.__start_maintenance()
 			self.__pause_replica(others=False)
 			wait_result = self.__wait_for_self_pause()
@@ -4092,10 +4121,7 @@ class pg_engine(object):
 			notifier_message = "maintenance for source %s is complete" % self.source
 			self.notifier.send_message(notifier_message, 'info')
 			self.logger.info(notifier_message)
-		else:
-			self.logger.info("Another source is in maintenance status. Skipping the maintenance run.")
-
-
+		
 	def drop_database_schema(self, schema_name, cascade):
 		"""
 			The method drops a database schema.
