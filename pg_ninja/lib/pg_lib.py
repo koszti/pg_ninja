@@ -4131,7 +4131,6 @@ class pg_engine(object):
 			self.__end_maintenance()
 			self.disconnect_db()
 			notifier_message = "maintenance for source %s is complete" % self.source
-			self.notifier.send_message(notifier_message, 'info')
 			self.logger.info(notifier_message)
 		
 	def drop_database_schema(self, schema_name, cascade):
