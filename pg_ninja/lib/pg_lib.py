@@ -2890,6 +2890,7 @@ class pg_engine(object):
 				list_conditions.append(where_cond)
 				table_schema = self.schema_loading[schema]["obfuscated"]
 				where_cond = "format('%%I.%%I','%s','%s')" % (table_schema, table_name)
+				list_conditions.append(where_cond)
 		sql_cleanup = "DELETE FROM sch_ninja.{} WHERE format('%%I.%%I',v_schema_name,v_table_name) IN (%s) ;" % ' ,'.join(list_conditions)
 		for log_table in log_tables[0]:
 			self.logger.debug("Cleaning up log events in log table %s " % (log_table,))
