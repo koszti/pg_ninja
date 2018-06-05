@@ -6,7 +6,7 @@ import codecs
 import binascii
 import hashlib
 from pymysqlreplication import BinLogStreamReader
-from pymysqlreplication.event import QueryEvent
+from pymysqlreplication.event import QueryEvent, GtidEvent, HeartbeatLogEvent
 from pymysqlreplication.row_event import DeleteRowsEvent,UpdateRowsEvent,WriteRowsEvent
 from pymysqlreplication.event import RotateEvent
 from pg_ninja import sql_token
@@ -672,6 +672,7 @@ class mysql_source(object):
 		self.limit_tables = self.source_config["limit_tables"]
 		self.skip_tables = self.source_config["skip_tables"]
 		self.replica_batch_size = self.source_config["replica_batch_size"]
+		self.sleep_loop = self.source_config["sleep_loop"]
 		self.hexify = [] + self.hexify_always
 		self.connect_db_buffered()
 		self.pg_engine.connect_db()
@@ -687,7 +688,7 @@ class mysql_source(object):
 		if self.gtid_mode:
 			master_data = self.get_master_coordinates()
 			self.start_xid = master_data[0]["Executed_Gtid_Set"].split(':')[1].split('-')[0]
-		
+
 	
 	def init_sync(self):
 		"""
@@ -854,8 +855,20 @@ class mysql_source(object):
 			table_map = {}
 		return table_type_map
 	
+	def __build_gtid_set(self, gtid):
+		"""
+			The method builds a gtid set using the current gtid and
+		"""
+		gtid_set = ""
+		if self.gtid_mode:
+			try:
+				gtid_data = gtid.split(':')
+				gtid_set = "%s:%s-%s" % (gtid_data[0], self.start_xid, gtid_data[1])  
+			except AttributeError:
+				pass
+		return gtid_set
 	
-	def read_replica_stream(self, batch_data):
+	def __read_replica_stream(self, batch_data):
 		"""
 		Stream the replica using the batch data. This method evaluates the different events streamed from MySQL 
 		and manages them accordingly. The BinLogStreamReader function is called with the only_event parameter which
@@ -886,6 +899,7 @@ class mysql_source(object):
 		"""
 		sql_tokeniser = sql_token()
 		skip_tables = None
+		next_gtid = None
 		if self.skip_tables:
 			skip_tables = [table.split('.')[1] for table in self.skip_tables]
 		
@@ -899,18 +913,29 @@ class mysql_source(object):
 		log_file = batch_data[0][1]
 		log_position = batch_data[0][2]
 		log_table = batch_data[0][3]
+		if self.gtid_mode:
+			gtid_set = batch_data[0][4]
+		else:
+			gtid_set = None
 		
 		my_stream = BinLogStreamReader(
 			connection_settings = self.replica_conn, 
 			server_id = self.my_server_id, 
-			only_events = [RotateEvent, DeleteRowsEvent, WriteRowsEvent, UpdateRowsEvent, QueryEvent], 
+			only_events = [RotateEvent, DeleteRowsEvent, WriteRowsEvent, UpdateRowsEvent, QueryEvent, GtidEvent, HeartbeatLogEvent], 
 			log_file = log_file, 
 			log_pos = log_position, 
+			auto_position = gtid_set, 
 			resume_stream = True, 
 			only_schemas = self.schema_replica, 
 			ignored_tables = skip_tables, 
+			slave_heartbeat = self.sleep_loop, 
 		)
-		self.logger.debug("log_file %s, log_position %s. id_batch: %s " % (log_file, log_position, id_batch))
+		
+		if gtid_set:
+			self.logger.debug("gtid: %s. id_batch: %s " % (gtid_set, id_batch))
+		else:
+			self.logger.debug("log_file %s, log_position %s. id_batch: %s " % (log_file, log_position, id_batch))
+		
 		
 		for binlogevent in my_stream:
 			if isinstance(binlogevent, RotateEvent):
@@ -925,11 +950,22 @@ class mysql_source(object):
 						master_data["File"]=binlogfile
 						master_data["Position"]=position
 						master_data["Time"]=event_time
+						master_data["Executed_Gtid_Set"] = self.__build_gtid_set( next_gtid)
 					if len(group_insert)>0:
 						self.pg_engine.write_batch(group_insert)
 						group_insert=[]
 					my_stream.close()
 					return [master_data, close_batch]
+			elif isinstance(binlogevent, GtidEvent):
+				next_gtid  = binlogevent.gtid
+			elif isinstance(binlogevent, HeartbeatLogEvent):
+				if len(group_insert)>0:
+						self.pg_engine.write_batch(group_insert)
+						group_insert=[]
+						my_stream.close()
+						master_data["File"]=binlogevent.ident
+						return [master_data, True]
+			
 			elif isinstance(binlogevent, QueryEvent):
 				event_time = binlogevent.timestamp
 				try:
@@ -945,6 +981,7 @@ class mysql_source(object):
 					master_data["File"] = binlogfile
 					master_data["Position"] = log_position
 					master_data["Time"] = event_time
+					master_data["Executed_Gtid_Set"] = self.__build_gtid_set( next_gtid)
 					if len(group_insert)>0:
 						self.pg_engine.write_batch(group_insert)
 						group_insert=[]
@@ -1097,6 +1134,7 @@ class mysql_source(object):
 					master_data["File"]=log_file
 					master_data["Position"]=log_position
 					master_data["Time"]=event_time
+					master_data["Executed_Gtid_Set"] = self.__build_gtid_set( next_gtid)
 					
 					if len(group_insert)>=self.replica_batch_size:
 						self.logger.info("Max rows per batch reached. Writing %s. rows. Size in bytes: %s " % (len(group_insert), size_insert))
@@ -1163,7 +1201,7 @@ class mysql_source(object):
 			batch_data = self.pg_engine.get_batch_data()
 			if len(batch_data)>0:
 				id_batch=batch_data[0][0]
-				replica_data=self.read_replica_stream(batch_data)
+				replica_data=self.__read_replica_stream(batch_data)
 				master_data=replica_data[0]
 				close_batch=replica_data[1]
 				if close_batch:
