@@ -33,6 +33,55 @@ class mysql_source(object):
 		self.disconnect_db_unbuffered()
 		self.disconnect_db_buffered()
 	
+	def __check_mysql_config(self):
+		"""
+			The method check if the mysql configuration is compatible with the replica requirements.
+			If all the configuration requirements are met then the return value is True.
+			Otherwise is false.
+			The parameters checked are
+			log_bin - ON if the binary log is enabled
+			binlog_format - must be ROW , otherwise the replica won't get the data
+			binlog_row_image - must be FULL, otherwise the row image will be incomplete
+			
+		"""
+		
+		sql_log_bin = """SHOW GLOBAL VARIABLES LIKE 'gtid_mode';"""
+		self.cursor_buffered.execute(sql_log_bin)
+		variable_check = self.cursor_buffered.fetchone()
+		if variable_check:
+			gtid_mode = variable_check["Value"]
+			if gtid_mode.upper() == 'ON':
+				self.gtid_mode = True
+		else:
+			self.gtid_mode = False
+		sql_log_bin = """SHOW GLOBAL VARIABLES LIKE 'log_bin';"""
+		self.cursor_buffered.execute(sql_log_bin)
+		variable_check = self.cursor_buffered.fetchone()
+		log_bin = variable_check["Value"]
+		
+		sql_log_bin = """SHOW GLOBAL VARIABLES LIKE 'binlog_format';"""
+		self.cursor_buffered.execute(sql_log_bin)
+		variable_check = self.cursor_buffered.fetchone()
+		binlog_format = variable_check["Value"]
+		
+		sql_log_bin = """SHOW GLOBAL VARIABLES LIKE 'binlog_row_image';"""
+		self.cursor_buffered.execute(sql_log_bin)
+		variable_check = self.cursor_buffered.fetchone()
+		if variable_check:
+			binlog_row_image = variable_check["Value"]
+		else:
+			binlog_row_image = 'FULL'
+			
+		if log_bin.upper() == 'ON' and binlog_format.upper() == 'ROW' and binlog_row_image.upper() == 'FULL':
+			self.replica_possible = True
+		else:
+			self.replica_possible = False
+			self.pg_engine.set_source_status("error")
+			self.logger.error("The MySQL configuration does not allow the replica. Exiting now")
+			self.logger.error("Source settings - log_bin %s, binlog_format %s, binlog_row_image %s" % (log_bin.upper(),  binlog_format.upper(), binlog_row_image.upper() ))
+			self.logger.error("Mandatory settings - log_bin ON, binlog_format ROW, binlog_row_image FULL (only for MySQL 5.6+) ")
+			sys.exit()
+
 	def connect_db_buffered(self):
 		"""
 			The method creates a new connection to the mysql database.
@@ -633,7 +682,11 @@ class mysql_source(object):
 		self.replica_conn["user"] = str(db_conn["user"])
 		self.replica_conn["passwd"] = str(db_conn["password"])
 		self.replica_conn["port"] = int(db_conn["port"])
-			
+		self.build_table_exceptions()
+		self.__check_mysql_config()
+		if self.gtid_mode:
+			master_data = self.get_master_coordinates()
+			self.start_xid = master_data[0]["Executed_Gtid_Set"].split(':')[1].split('-')[0]
 		
 	
 	def init_sync(self):
@@ -662,6 +715,7 @@ class mysql_source(object):
 		self.logger.debug("starting sync schema for source %s" % self.source)
 		self.logger.debug("The schema affected is %s" % self.schema)
 		self.init_sync()
+		self.__check_mysql_config()
 		self.pg_engine.set_source_status("syncing")
 		self.build_table_exceptions()
 		self.schema_list = [self.schema]
@@ -711,6 +765,7 @@ class mysql_source(object):
 		"""
 		self.logger.debug("starting sync tables for source %s" % self.source)
 		self.init_sync()
+		self.__check_mysql_config()
 		self.pg_engine.set_source_status("syncing")
 		if self.tables == 'disabled':
 			self.tables = self.pg_engine.get_tables_disabled()
