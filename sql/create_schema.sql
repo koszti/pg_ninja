@@ -4,7 +4,7 @@ CREATE SCHEMA IF NOT EXISTS sch_ninja;
 --VIEWS
 CREATE OR REPLACE VIEW sch_ninja.v_version 
  AS
-	SELECT '2.0.2'::TEXT t_version
+	SELECT '2.0.3'::TEXT t_version
 ;
 
 --TYPES
@@ -94,6 +94,7 @@ CREATE TABLE sch_ninja.t_replica_batch
 (
   i_id_batch bigserial NOT NULL,
   i_id_source bigint NOT NULL,
+  t_gtid_set text,
   t_binlog_name text,
   i_binlog_position bigint,
   b_started boolean NOT NULL DEFAULT False,
