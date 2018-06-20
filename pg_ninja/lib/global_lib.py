@@ -579,7 +579,13 @@ class replica_engine(object):
 		else:
 			auto_maintenance = self.config["sources"][self.args.source]["auto_maintenance"]
 		
+		if "gtid_enable" not in  self.config["sources"][self.args.source]:
+			gtid_enable = False 
+		else:
+			gtid_enable =  self.config["sources"][self.args.source]["gtid_enable"]
 		
+		self.mysql_source.gtid_enable = gtid_enable
+
 		log_read = self.__init_logger("read")
 		log_replay = self.__init_logger("replay")
 		

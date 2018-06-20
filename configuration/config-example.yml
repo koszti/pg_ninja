@@ -36,8 +36,6 @@ sources:
         copy_max_memory: "300M"
         grant_select_to:
             - usr_readonly
-        create_views_in_schema:
-            - sch_readonly
         lock_timeout: "120s"
         grant_select_to:
             clear:
@@ -53,6 +51,7 @@ sources:
         on_error_replay: 'exit'
         obfuscation_file: '~/.pg_ninja/obfuscation/obfuscation-example.yml'
         auto_maintenance: "1 day"
+        gtid_enable: No
         type: mysql
 
 # type_override allows the user to override the default type conversion into a different one. 
