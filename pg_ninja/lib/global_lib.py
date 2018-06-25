@@ -69,7 +69,7 @@ class replica_engine(object):
 		"""
 			Class constructor.
 		"""
-		self.catalog_version = '2.0.2'
+		self.catalog_version = '2.0.3'
 		self.upgradable_version = '0.18'
 		self.lst_yes= ['yes',  'Yes', 'y', 'Y']
 		python_lib=get_python_lib()
@@ -579,7 +579,13 @@ class replica_engine(object):
 		else:
 			auto_maintenance = self.config["sources"][self.args.source]["auto_maintenance"]
 		
+		if "gtid_enable" not in  self.config["sources"][self.args.source]:
+			gtid_enable = False 
+		else:
+			gtid_enable =  self.config["sources"][self.args.source]["gtid_enable"]
 		
+		self.mysql_source.gtid_enable = gtid_enable
+
 		log_read = self.__init_logger("read")
 		log_replay = self.__init_logger("replay")
 		

@@ -6,7 +6,7 @@ import codecs
 import binascii
 import hashlib
 from pymysqlreplication import BinLogStreamReader
-from pymysqlreplication.event import QueryEvent
+from pymysqlreplication.event import QueryEvent, GtidEvent, HeartbeatLogEvent
 from pymysqlreplication.row_event import DeleteRowsEvent,UpdateRowsEvent,WriteRowsEvent
 from pymysqlreplication.event import RotateEvent
 from pg_ninja import sql_token
@@ -25,6 +25,7 @@ class mysql_source(object):
 		self.schema_list = []
 		self.hexify_always = ['blob', 'tinyblob', 'mediumblob','longblob','binary','varbinary','geometry']
 		self.schema_only = {}
+		self.gtid_enable = False
 	
 	def __del__(self):
 		"""
@@ -33,6 +34,72 @@ class mysql_source(object):
 		self.disconnect_db_unbuffered()
 		self.disconnect_db_buffered()
 	
+	def __check_mysql_config(self):
+		"""
+			The method check if the mysql configuration is compatible with the replica requirements.
+			If all the configuration requirements are met then the return value is True.
+			Otherwise is false.
+			The parameters checked are
+			log_bin - ON if the binary log is enabled
+			binlog_format - must be ROW , otherwise the replica won't get the data
+			binlog_row_image - must be FULL, otherwise the row image will be incomplete
+			
+		"""
+		
+		if self.gtid_enable:
+			sql_log_bin = """SHOW GLOBAL VARIABLES LIKE 'gtid_mode';"""
+			self.cursor_buffered.execute(sql_log_bin)
+			variable_check = self.cursor_buffered.fetchone()
+			if variable_check:
+				gtid_mode = variable_check["Value"]
+				if gtid_mode.upper() == 'ON':
+					self.gtid_mode = True
+					sql_uuid = """SHOW SLAVE STATUS;"""
+					self.cursor_buffered.execute(sql_uuid)
+					slave_status = self.cursor_buffered.fetchall()
+					if len(slave_status)>0:
+						gtid_set=slave_status[0]["Retrieved_Gtid_Set"]
+					else:
+						sql_uuid = """SHOW GLOBAL VARIABLES LIKE 'server_uuid';"""
+						self.cursor_buffered.execute(sql_uuid)
+						server_uuid = self.cursor_buffered.fetchone()
+						gtid_set = server_uuid["Value"]
+					self.gtid_uuid = gtid_set.split(':')[0]
+					
+			else:
+				self.gtid_mode = False
+		else:
+			self.gtid_mode = False
+					
+			
+		sql_log_bin = """SHOW GLOBAL VARIABLES LIKE 'log_bin';"""
+		self.cursor_buffered.execute(sql_log_bin)
+		variable_check = self.cursor_buffered.fetchone()
+		log_bin = variable_check["Value"]
+		
+		sql_log_bin = """SHOW GLOBAL VARIABLES LIKE 'binlog_format';"""
+		self.cursor_buffered.execute(sql_log_bin)
+		variable_check = self.cursor_buffered.fetchone()
+		binlog_format = variable_check["Value"]
+		
+		sql_log_bin = """SHOW GLOBAL VARIABLES LIKE 'binlog_row_image';"""
+		self.cursor_buffered.execute(sql_log_bin)
+		variable_check = self.cursor_buffered.fetchone()
+		if variable_check:
+			binlog_row_image = variable_check["Value"]
+		else:
+			binlog_row_image = 'FULL'
+			
+		if log_bin.upper() == 'ON' and binlog_format.upper() == 'ROW' and binlog_row_image.upper() == 'FULL':
+			self.replica_possible = True
+		else:
+			self.replica_possible = False
+			self.pg_engine.set_source_status("error")
+			self.logger.error("The MySQL configuration does not allow the replica. Exiting now")
+			self.logger.error("Source settings - log_bin %s, binlog_format %s, binlog_row_image %s" % (log_bin.upper(),  binlog_format.upper(), binlog_row_image.upper() ))
+			self.logger.error("Mandatory settings - log_bin ON, binlog_format ROW, binlog_row_image FULL (only for MySQL 5.6+) ")
+			sys.exit()
+
 	def connect_db_buffered(self):
 		"""
 			The method creates a new connection to the mysql database.
@@ -623,6 +690,7 @@ class mysql_source(object):
 		self.limit_tables = self.source_config["limit_tables"]
 		self.skip_tables = self.source_config["skip_tables"]
 		self.replica_batch_size = self.source_config["replica_batch_size"]
+		self.sleep_loop = self.source_config["sleep_loop"]
 		self.hexify = [] + self.hexify_always
 		self.connect_db_buffered()
 		self.pg_engine.connect_db()
@@ -633,8 +701,12 @@ class mysql_source(object):
 		self.replica_conn["user"] = str(db_conn["user"])
 		self.replica_conn["passwd"] = str(db_conn["password"])
 		self.replica_conn["port"] = int(db_conn["port"])
-			
-		
+		self.build_table_exceptions()
+		self.__check_mysql_config()
+		if self.gtid_mode:
+			master_data = self.get_master_coordinates()
+			self.start_xid = master_data[0]["Executed_Gtid_Set"].split(':')[1].split('-')[0]
+
 	
 	def init_sync(self):
 		"""
@@ -662,6 +734,7 @@ class mysql_source(object):
 		self.logger.debug("starting sync schema for source %s" % self.source)
 		self.logger.debug("The schema affected is %s" % self.schema)
 		self.init_sync()
+		self.__check_mysql_config()
 		self.pg_engine.set_source_status("syncing")
 		self.build_table_exceptions()
 		self.schema_list = [self.schema]
@@ -711,6 +784,7 @@ class mysql_source(object):
 		"""
 		self.logger.debug("starting sync tables for source %s" % self.source)
 		self.init_sync()
+		self.__check_mysql_config()
 		self.pg_engine.set_source_status("syncing")
 		if self.tables == 'disabled':
 			self.tables = self.pg_engine.get_tables_disabled()
@@ -799,8 +873,26 @@ class mysql_source(object):
 			table_map = {}
 		return table_type_map
 	
+	def __build_gtid_set(self, gtid):
+		"""
+			The method builds a gtid set using the current gtid and
+		"""
+		gtid_pack = []
+		master_data= self.get_master_coordinates()
+		gtid_set = master_data[0]["Executed_Gtid_Set"]
+		gtid_list = gtid_set.split(",\n")
+		for gtid_item in gtid_list:
+			if gtid_item.split(':')[0] in gtid:
+				gtid_old = gtid_item.split(':')
+				gtid_new = "%s:%s-%s" % (gtid_old[0],gtid_old[1].split('-')[0],gtid[gtid_old[0]])
+				gtid_pack.append(gtid_new)
+			else:
+				gtid_pack.append(gtid_item)
+		new_set = ",\n".join(gtid_pack)
+		return new_set
+
 	
-	def read_replica_stream(self, batch_data):
+	def __read_replica_stream(self, batch_data):
 		"""
 		Stream the replica using the batch data. This method evaluates the different events streamed from MySQL 
 		and manages them accordingly. The BinLogStreamReader function is called with the only_event parameter which
@@ -831,6 +923,7 @@ class mysql_source(object):
 		"""
 		sql_tokeniser = sql_token()
 		skip_tables = None
+		
 		if self.skip_tables:
 			skip_tables = [table.split('.')[1] for table in self.skip_tables]
 		
@@ -839,23 +932,35 @@ class mysql_source(object):
 		close_batch = False
 		master_data = {}
 		group_insert = []
+		next_gtid = {}
 		
 		id_batch = batch_data[0][0]
 		log_file = batch_data[0][1]
 		log_position = batch_data[0][2]
 		log_table = batch_data[0][3]
+		if self.gtid_mode:
+			gtid_set = batch_data[0][4]
+		else:
+			gtid_set = None
 		
 		my_stream = BinLogStreamReader(
 			connection_settings = self.replica_conn, 
 			server_id = self.my_server_id, 
-			only_events = [RotateEvent, DeleteRowsEvent, WriteRowsEvent, UpdateRowsEvent, QueryEvent], 
+			only_events = [RotateEvent, DeleteRowsEvent, WriteRowsEvent, UpdateRowsEvent, QueryEvent, GtidEvent, HeartbeatLogEvent], 
 			log_file = log_file, 
 			log_pos = log_position, 
+			auto_position = gtid_set, 
 			resume_stream = True, 
 			only_schemas = self.schema_replica, 
 			ignored_tables = skip_tables, 
+			slave_heartbeat = self.sleep_loop, 
 		)
-		self.logger.debug("log_file %s, log_position %s. id_batch: %s " % (log_file, log_position, id_batch))
+		
+		if gtid_set:
+			self.logger.debug("gtid: %s. id_batch: %s " % (gtid_set, id_batch))
+		else:
+			self.logger.debug("log_file %s, log_position %s. id_batch: %s " % (log_file, log_position, id_batch))
+		
 		
 		for binlogevent in my_stream:
 			if isinstance(binlogevent, RotateEvent):
@@ -870,11 +975,23 @@ class mysql_source(object):
 						master_data["File"]=binlogfile
 						master_data["Position"]=position
 						master_data["Time"]=event_time
+						master_data["gtid"] = next_gtid
 					if len(group_insert)>0:
 						self.pg_engine.write_batch(group_insert)
 						group_insert=[]
 					my_stream.close()
 					return [master_data, close_batch]
+			elif isinstance(binlogevent, GtidEvent):
+				gtid  = binlogevent.gtid.split(':')
+				next_gtid[gtid [0]]  = gtid [1]
+			elif isinstance(binlogevent, HeartbeatLogEvent):
+				if len(group_insert)>0:
+						self.pg_engine.write_batch(group_insert)
+						group_insert=[]
+						my_stream.close()
+						master_data["File"]=binlogevent.ident
+						return [master_data, True]
+			
 			elif isinstance(binlogevent, QueryEvent):
 				event_time = binlogevent.timestamp
 				try:
@@ -890,6 +1007,7 @@ class mysql_source(object):
 					master_data["File"] = binlogfile
 					master_data["Position"] = log_position
 					master_data["Time"] = event_time
+					master_data["gtid"] = next_gtid
 					if len(group_insert)>0:
 						self.pg_engine.write_batch(group_insert)
 						group_insert=[]
@@ -1042,6 +1160,7 @@ class mysql_source(object):
 					master_data["File"]=log_file
 					master_data["Position"]=log_position
 					master_data["Time"]=event_time
+					master_data["gtid"] = next_gtid
 					
 					if len(group_insert)>=self.replica_batch_size:
 						self.logger.info("Max rows per batch reached. Writing %s. rows. Size in bytes: %s " % (len(group_insert), size_insert))
@@ -1108,9 +1227,13 @@ class mysql_source(object):
 			batch_data = self.pg_engine.get_batch_data()
 			if len(batch_data)>0:
 				id_batch=batch_data[0][0]
-				replica_data=self.read_replica_stream(batch_data)
+				replica_data=self.__read_replica_stream(batch_data)
 				master_data=replica_data[0]
 				close_batch=replica_data[1]
+				if "gtid" in master_data:
+					master_data["Executed_Gtid_Set"] = self.__build_gtid_set(master_data["gtid"])
+				else:
+					master_data["Executed_Gtid_Set"] = ""
 				if close_batch:
 					self.master_status=[]
 					self.master_status.append(master_data)
