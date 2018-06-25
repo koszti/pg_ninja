@@ -891,6 +891,26 @@ class mysql_source(object):
 		new_set = ",\n".join(gtid_pack)
 		return new_set
 
+	def __store_binlog_event(self, table, schema):
+		"""
+		The private method returns whether the table event should be stored or not in the postgresql log replica.
+			
+		:param table: The table's name to check
+		:param schema: The table's schema name
+		:return: true if the table should be replicated, false if shouldn't
+		:rtype: boolean
+		"""
+		if schema in self.skip_tables:
+			if table in self.skip_tables[schema]:
+				return False
+				
+		if schema in self.limit_tables:
+			if table in self.limit_tables[schema]:
+				return True
+			else:
+				return False
+
+		return True
 	
 	def __read_replica_stream(self, batch_data):
 		"""
@@ -922,10 +942,6 @@ class mysql_source(object):
 		:rtype: dictionary
 		"""
 		sql_tokeniser = sql_token()
-		skip_tables = None
-		
-		if self.skip_tables:
-			skip_tables = [table.split('.')[1] for table in self.skip_tables]
 		
 		table_type_map = self.get_table_type_map()	
 		inc_tables = self.pg_engine.get_inconsistent_tables()
@@ -952,7 +968,6 @@ class mysql_source(object):
 			auto_position = gtid_set, 
 			resume_stream = True, 
 			only_schemas = self.schema_replica, 
-			ignored_tables = skip_tables, 
 			slave_heartbeat = self.sleep_loop, 
 		)
 		
@@ -1016,32 +1031,34 @@ class mysql_source(object):
 					for token in sql_tokeniser.tokenised:
 						write_ddl = True
 						table_name = token["name"] 
-						if table_name in inc_tables:
-							write_ddl = False
-							log_seq = int(log_file.split('.')[1])
-							log_pos = int(log_position)
-							table_dic = inc_tables[table_name]
-							if log_seq > table_dic["log_seq"]:
-								write_ddl = True
-							elif log_seq == table_dic["log_seq"] and log_pos >= table_dic["log_pos"]:
-								write_ddl = True
+						store_query = self.__store_binlog_event(table_name, schema_query)
+						if store_query:
+							if table_name in inc_tables:
+								write_ddl = False
+								log_seq = int(log_file.split('.')[1])
+								log_pos = int(log_position)
+								table_dic = inc_tables[table_name]
+								if log_seq > table_dic["log_seq"]:
+									write_ddl = True
+								elif log_seq == table_dic["log_seq"] and log_pos >= table_dic["log_pos"]:
+									write_ddl = True
+								if write_ddl:
+									self.logger.info("CONSISTENT POINT FOR TABLE %s.%s REACHED  - binlogfile %s, position %s" % (schema_query, table_name, binlogfile, log_position))
+									self.pg_engine.set_consistent_table(table_name, destination_schema)
+									inc_tables = self.pg_engine.get_inconsistent_tables()
 							if write_ddl:
-								self.logger.info("CONSISTENT POINT FOR TABLE %s.%s REACHED  - binlogfile %s, position %s" % (schema_query, table_name, binlogfile, log_position))
-								self.pg_engine.set_consistent_table(table_name, destination_schema)
-								inc_tables = self.pg_engine.get_inconsistent_tables()
-						if write_ddl:
-							event_time = binlogevent.timestamp
-							self.logger.debug("TOKEN: %s" % (token))
-							
-							if len(token)>0:
-								query_data={
-									"binlog":log_file, 
-									"logpos":log_position, 
-									"schema": destination_schema, 
-									"batch_id":id_batch, 
-									"log_table":log_table
-								}
-								self.pg_engine.write_ddl(token, query_data, destination_schema, obfuscated_schema)
+								event_time = binlogevent.timestamp
+								self.logger.debug("TOKEN: %s" % (token))
+								
+								if len(token)>0:
+									query_data={
+										"binlog":log_file, 
+										"logpos":log_position, 
+										"schema": destination_schema, 
+										"batch_id":id_batch, 
+										"log_table":log_table
+									}
+									self.pg_engine.write_ddl(token, query_data, destination_schema, obfuscated_schema)
 								
 							
 						
@@ -1058,7 +1075,6 @@ class mysql_source(object):
 					event_before={}
 					event_insert = {}
 					event_obf = {}
-					
 					add_row = True
 					log_file=binlogfile
 					log_position=binlogevent.packet.log_pos
@@ -1068,107 +1084,109 @@ class mysql_source(object):
 					destination_schema = self.schema_mappings[schema_row]["clear"]
 					obfuscated_schema = self.schema_mappings[schema_row]["obfuscate"]
 					table_consistent_dict = "%s.%s" % (destination_schema, table_name)
-					try:
-						
-						if schema_row in self.obfuscation:
-							try:
-								table_obfuscation = self.obfuscation[schema_row][table_name]
-							except:
-								table_obfuscation = None
-					except:
-						table_obfuscation = None
-
-					if table_consistent_dict in inc_tables:
-						
-						table_consistent = False
-						log_seq = int(log_file.split('.')[1])
-						log_pos = int(log_position)
-						table_dic = inc_tables[table_consistent_dict]
-						if log_seq > table_dic["log_seq"]:
-							table_consistent = True
-						elif log_seq == table_dic["log_seq"] and log_pos >= table_dic["log_pos"]:
-							table_consistent = True
-							self.logger.debug("CONSISTENT POINT FOR TABLE %s REACHED  - binlogfile %s, position %s" % (table_name, binlogfile, log_position))
-						if table_consistent:
-							add_row = True
-							self.pg_engine.set_consistent_table(table_name, [destination_schema, obfuscated_schema])
-							inc_tables = self.pg_engine.get_inconsistent_tables()
-						else:
-							add_row = False
-					
-					column_map=table_type_map[schema_row][table_name]
-					global_data={
-										"binlog":log_file, 
-										"logpos":log_position, 
-										"schema": destination_schema, 
-										"table": table_name, 
-										"batch_id":id_batch, 
-										"log_table":log_table, 
-										"event_time":event_time
-									}
-					
-					if add_row:
-						
-						if isinstance(binlogevent, DeleteRowsEvent):
-							global_data["action"] = "delete"
-							event_after=row["values"]
-						elif isinstance(binlogevent, UpdateRowsEvent):
-							global_data["action"] = "update"
-							event_after=row["after_values"]
-							event_before=row["before_values"]
-						elif isinstance(binlogevent, WriteRowsEvent):
-							global_data["action"] = "insert"
-							event_after=row["values"]
-						for column_name in event_after:
-							try:
-								column_type=column_map[column_name]
-							except KeyError:
-								self.logger.info("Detected inconsistent structure for the table  %s. The replay may fail. " % (table_name))
-								column_type = 'text'
-							if column_type in self.hexify and event_after[column_name]:
-								event_after[column_name]=binascii.hexlify(event_after[column_name]).decode()
-							elif column_type in self.hexify and isinstance(event_after[column_name], bytes):
-								event_after[column_name] = ''
-						for column_name in event_before:
-							try:
-								column_type=column_map[column_name]
-							except KeyError:
-								self.logger.info("Detected inconsistent structure for the table  %s. The replay may fail. " % (table_name))
-								column_type = 'text'
-							if column_type in self.hexify and event_before[column_name]:
-								event_before[column_name]=binascii.hexlify(event_before[column_name]).decode()
-							elif column_type in self.hexify and isinstance(event_before[column_name], bytes):
-								event_before[column_name] = ''
-						event_insert={"global_data":global_data,"event_after":event_after,  "event_before":event_before}
-						size_insert += len(str(event_insert))
-						group_insert.append(event_insert)
-					
-						if table_obfuscation:
-							event_after_obf = dict(event_after.items())
-							global_obf = dict(global_data.items())
-							global_obf["schema"] = obfuscated_schema
-							for column_name in table_obfuscation:
+					store_row = self.__store_binlog_event(table_name, schema_row)
+					if store_row :
+						try:
+							
+							if schema_row in self.obfuscation:
 								try:
-									obf_mode = table_obfuscation[column_name]
-									event_after_obf[column_name]=self.obfuscate_value(event_after_obf[column_name], obf_mode)
+									table_obfuscation = self.obfuscation[schema_row][table_name]
 								except:
-									self.logger.error("discarded row in obfuscation process.\n global_data:%s \n event_data:%s \n" % (global_data,event_after ))
-							event_obf={"global_data":global_obf,"event_after":event_after_obf,  "event_before":event_before}
-							group_insert.append(event_obf)
+									table_obfuscation = None
+						except:
+							table_obfuscation = None
+
+						if table_consistent_dict in inc_tables:
+							
+							table_consistent = False
+							log_seq = int(log_file.split('.')[1])
+							log_pos = int(log_position)
+							table_dic = inc_tables[table_consistent_dict]
+							if log_seq > table_dic["log_seq"]:
+								table_consistent = True
+							elif log_seq == table_dic["log_seq"] and log_pos >= table_dic["log_pos"]:
+								table_consistent = True
+								self.logger.debug("CONSISTENT POINT FOR TABLE %s REACHED  - binlogfile %s, position %s" % (table_name, binlogfile, log_position))
+							if table_consistent:
+								add_row = True
+								self.pg_engine.set_consistent_table(table_name, [destination_schema, obfuscated_schema])
+								inc_tables = self.pg_engine.get_inconsistent_tables()
+							else:
+								add_row = False
 						
-					
-					master_data["File"]=log_file
-					master_data["Position"]=log_position
-					master_data["Time"]=event_time
-					master_data["gtid"] = next_gtid
-					
-					if len(group_insert)>=self.replica_batch_size:
-						self.logger.info("Max rows per batch reached. Writing %s. rows. Size in bytes: %s " % (len(group_insert), size_insert))
-						self.logger.debug("Master coordinates: %s" % (master_data, ))
-						self.pg_engine.write_batch(group_insert)
-						size_insert=0
-						group_insert=[]
-						close_batch=True
+						column_map=table_type_map[schema_row][table_name]
+						global_data={
+											"binlog":log_file, 
+											"logpos":log_position, 
+											"schema": destination_schema, 
+											"table": table_name, 
+											"batch_id":id_batch, 
+											"log_table":log_table, 
+											"event_time":event_time
+										}
+						
+						if add_row:
+							
+							if isinstance(binlogevent, DeleteRowsEvent):
+								global_data["action"] = "delete"
+								event_after=row["values"]
+							elif isinstance(binlogevent, UpdateRowsEvent):
+								global_data["action"] = "update"
+								event_after=row["after_values"]
+								event_before=row["before_values"]
+							elif isinstance(binlogevent, WriteRowsEvent):
+								global_data["action"] = "insert"
+								event_after=row["values"]
+							for column_name in event_after:
+								try:
+									column_type=column_map[column_name]
+								except KeyError:
+									self.logger.info("Detected inconsistent structure for the table  %s. The replay may fail. " % (table_name))
+									column_type = 'text'
+								if column_type in self.hexify and event_after[column_name]:
+									event_after[column_name]=binascii.hexlify(event_after[column_name]).decode()
+								elif column_type in self.hexify and isinstance(event_after[column_name], bytes):
+									event_after[column_name] = ''
+							for column_name in event_before:
+								try:
+									column_type=column_map[column_name]
+								except KeyError:
+									self.logger.info("Detected inconsistent structure for the table  %s. The replay may fail. " % (table_name))
+									column_type = 'text'
+								if column_type in self.hexify and event_before[column_name]:
+									event_before[column_name]=binascii.hexlify(event_before[column_name]).decode()
+								elif column_type in self.hexify and isinstance(event_before[column_name], bytes):
+									event_before[column_name] = ''
+							event_insert={"global_data":global_data,"event_after":event_after,  "event_before":event_before}
+							size_insert += len(str(event_insert))
+							group_insert.append(event_insert)
+						
+							if table_obfuscation:
+								event_after_obf = dict(event_after.items())
+								global_obf = dict(global_data.items())
+								global_obf["schema"] = obfuscated_schema
+								for column_name in table_obfuscation:
+									try:
+										obf_mode = table_obfuscation[column_name]
+										event_after_obf[column_name]=self.obfuscate_value(event_after_obf[column_name], obf_mode)
+									except:
+										self.logger.error("discarded row in obfuscation process.\n global_data:%s \n event_data:%s \n" % (global_data,event_after ))
+								event_obf={"global_data":global_obf,"event_after":event_after_obf,  "event_before":event_before}
+								group_insert.append(event_obf)
+							
+						
+						master_data["File"]=log_file
+						master_data["Position"]=log_position
+						master_data["Time"]=event_time
+						master_data["gtid"] = next_gtid
+						
+						if len(group_insert)>=self.replica_batch_size:
+							self.logger.info("Max rows per batch reached. Writing %s. rows. Size in bytes: %s " % (len(group_insert), size_insert))
+							self.logger.debug("Master coordinates: %s" % (master_data, ))
+							self.pg_engine.write_batch(group_insert)
+							size_insert=0
+							group_insert=[]
+							close_batch=True
 						
 						
 						
