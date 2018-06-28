@@ -2744,6 +2744,8 @@ class pg_engine(object):
 				self.set_autocommit_db(False)
 				for schema in old_schema_mappings:
 					old_mapping = old_schema_mappings[schema]
+					old_clear = old_mapping["clear"]
+					old_obf = old_mapping["obfuscate"]
 					try:
 						new_mapping = new_schema_mappings[schema]
 					except KeyError:
@@ -2754,10 +2756,10 @@ class pg_engine(object):
 							DELETE FROM sch_ninja.t_replica_tables 
 							WHERE 	
 									i_id_source=%s
-								AND	v_schema_name=%s
+								AND	v_schema_name IN (%s,%s)
 							;
 						"""
-						self.pgsql_cur.execute(sql_delete, (self.i_id_source,old_mapping ))
+						self.pgsql_cur.execute(sql_delete, (self.i_id_source,old_clear,old_obf))
 					elif old_mapping != new_mapping:
 						sub_schemas = ["clear", "obfuscate"]
 						for sub_schema in sub_schemas:
