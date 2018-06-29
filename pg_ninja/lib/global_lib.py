@@ -76,20 +76,32 @@ class replica_engine(object):
 		cham_dir = "%s/.pg_ninja" % os.path.expanduser('~')	
 		
 		
-		local_conf = "%s/configuration/" % cham_dir 
-		self.global_conf_example = '%s/pg_ninja/configuration/config-example.yml' % python_lib
-		self.local_conf_example = '%s/config-example.yml' % local_conf
+		local_conf = "%s/configuration/" % cham_dir
+		local_obf = "%s/obfuscation_config/" % cham_dir
+		global_conf_example = '%s/pg_ninja/configuration/config-example.yml' % python_lib
+		local_conf_example = '%s/config-example.yml' % local_conf
+		global_obf_example = '%s/pg_ninja/obfuscation_config/obfuscation-example.yml' % python_lib
+		local_obf_example = '%s/obfuscation-example.yml' % local_obf
 		
 		local_logs = "%s/logs/" % cham_dir 
 		local_pid = "%s/pid/" % cham_dir 
 		
 		self.conf_dirs=[
 			cham_dir, 
-			local_conf, 
+			local_conf,
+			local_obf,
 			local_logs, 
 			local_pid, 
 			
 		]
+
+		self.conf_examples = [
+			# Replica example
+			{ "global": global_conf_example, "local": local_conf_example },
+			# Obfuscate example
+			{ "global": global_obf_example, "local": local_obf_example }
+		]
+
 		self.args = args
 		self.set_configuration_files()
 		self.args = args
@@ -195,7 +207,7 @@ class replica_engine(object):
 		""" 
 			The method loops the list self.conf_dirs creating them only if they are missing.
 			
-			The method checks the freshness of the config-example.yaml and connection-example.yml 
+			The method checks the freshness of the config-example.yaml and obfuscation-example.yml
 			copies the new version from the python library determined in the class constructor with get_python_lib().
 			
 			If the configuration file is missing the method copies the file with a different message.
@@ -207,15 +219,15 @@ class replica_engine(object):
 				print ("creating directory %s" % confdir)
 				os.mkdir(confdir)
 		
-				
-		if os.path.isfile(self.local_conf_example):
-			if os.path.getctime(self.global_conf_example)>os.path.getctime(self.local_conf_example):
-				print ("updating configuration example with %s" % self.local_conf_example)
-				copy(self.global_conf_example, self.local_conf_example)
-		else:
-			print ("copying configuration  example in %s" % self.local_conf_example)
-			copy(self.global_conf_example, self.local_conf_example)
-	
+		for example in self.conf_examples:
+			if os.path.isfile(example["local"]):
+				if os.path.getctime(example["global"]) > os.path.getctime(example["local"]):
+					print ("updating configuration example with %s" % example["local"])
+					copy(example["global"], example["local"])
+			else:
+				print ("copying configuration example in %s" % example["local"])
+				copy(example["global"], example["local"])
+
 	def load_config(self):
 		""" 
 			The method loads the configuration from the file specified in the args.config parameter.

@@ -61,11 +61,11 @@ Setup
 * Create the replica user on PostgreSQL 
 * Create a database on PostgreSQL with owner the replica user created at the step before
 * Create the pg_crypto extension on the replica database
-* Run ninja.py to create the configuration directory ~/.pg_ninja
-* cd in  ~/.pg_ninja and copy the configuration-example.yaml to another file (e.g. default.yaml)
-* Copy the obfuscation-example.yaml file to another file (e.g. obfuscation-example.yaml)
-* Setup the connection in default.yaml
-* Setup the obfuscation stragegies in obfuscation-example.yaml
+* Run pgninja.py set_configuration_files to create the configuration directory ~/.pg_ninja
+* cd in ~/.pg_ninja/configuration and copy the config-example.yml to another file (e.g. default.yml)
+* cd in ~/.pg_ninja/obfuscation_config and copy the obfuscation-example.yml file to another file (e.g. obfuscation-example.yml)
+* Setup the connection in default.yml
+* Setup the obfuscation stragegies in obfuscation-example.yml
 * Create the service schema with ninja.py create_schema --config default
 * Add the replica source with ninja.py add_source --config default
 * Init the replica  ninja.py init_replica--config default . Warning this will lock the mysql db in read only mode for the time required by the replica init.
